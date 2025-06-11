@@ -2,21 +2,19 @@
 
 import os
 import torch
-import esm
-from pathlib import Path
+from esm.models.esm3 import ESM3
+from esm.sdk.api import ESM3InferenceClient, ESMProtein, GenerationConfig
 
-# Paths
+# File paths
 FASTA_FILE = "/data/summer2020/naufal/protein_sequences.fasta"
 OUTPUT_DIR = "/data/summer2020/naufal/esm3_embeddings"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Load model
-print("Loading ESM-3 now..")
-model, alphabet = esm.pretrained.esm3_t33_650M_UR50D()
-batch_converter = alphabet.get_batch_converter()
-model.eval().cuda()  # Use .cpu() if no GPU
+# Load ESM-3 model via Hugging Face
+print("Loading ESM-3 model from Hugging Face...")
+model: ESM3InferenceClient = ESM3.from_pretrained("esm3-open").to("cuda")  # Use "cpu" if needed
 
-# Helper: FASTA reader
+# Generator to read sequences one at a time
 def fasta_reader(path):
     with open(path, "r") as file:
         identifier, sequence = None, []
@@ -32,25 +30,25 @@ def fasta_reader(path):
         if identifier:
             yield identifier, "".join(sequence)
 
-# Stream process
-print("Feeding sequences...")
+# Process sequences
+print("Generating structure embeddings...")
 for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
     if not seq or set(seq) == {"."}:
         print(f"Skipping {seq_id} (invalid sequence).")
         continue
 
-    batch_labels, batch_strs, batch_tokens = batch_converter([(seq_id, seq)])
-    batch_tokens = batch_tokens.cuda()
+    try:
+        protein = ESMProtein(sequence=seq)
+        protein = model.generate(protein, GenerationConfig(track="structure", num_steps=8))
+        coords = torch.tensor(protein.coordinates)  # [L, 3, 3]
+        torch.save(coords, os.path.join(OUTPUT_DIR, f"{seq_id}.pt"))
 
-    with torch.no_grad():
-        results = model(batch_tokens, repr_layers=[33], return_contacts=False)
+        if idx % 100 == 0:
+            print(f"Processed {idx} sequences...")
 
-    token_representations = results["representations"][33][0, 1: len(seq) + 1]
-    output_path = os.path.join(OUTPUT_DIR, f"{seq_id}.pt")
-    torch.save(token_representations.cpu(), output_path)
+    except Exception as e:
+        print(f"Error processing {seq_id}: {e}")
 
-    if idx % 100 == 0:
-        print(f"Processed {idx} sequences...")
+print(f"Done. All embeddings saved to {OUTPUT_DIR}")
 
-print(f"Completed. Embeddings saved to: {OUTPUT_DIR}")
 
