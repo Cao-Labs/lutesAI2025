@@ -1,4 +1,5 @@
 # generate_idmapping_uni_minimal.py
+# This file extracts relevant information from the huge id mapping file
 
 input_file = "/data/shared/databases/UniProt2025/idmapping.dat"
 output_file = "/data/shared/databases/UniProt2025/idmapping_uni.txt"
