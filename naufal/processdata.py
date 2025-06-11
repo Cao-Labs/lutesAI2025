@@ -67,9 +67,10 @@ with open(fasta_out, "w") as fasta_f, \
             # Update and report match count
             matched += 1
             if matched == 5000 and not reported:
-                print("✅ Matched 5000 proteins...")
+                print("5000 matches found as of now.")
                 reported = True
             elif matched > 0 and matched % 100000 == 0:
-                print(f"✅ Matched {matched} proteins...")
+                print(f"{matched} matches found as of now.")
 
-print(f"✅ Finished processing. Total matched proteins: {matched}")
+print(f"Processing finished. {matched} proteins matched.")
+
