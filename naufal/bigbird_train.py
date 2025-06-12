@@ -1,5 +1,5 @@
-# Proteinext 2.0 Training Script 
 
+# Proteinext 2.0 Training Script 
 
 import os
 import torch
@@ -126,12 +126,10 @@ class ProteinFunctionDataset(Dataset):
         emb_path = os.path.join(self.embeddings_dir, f"{pid}.pt")
         if not os.path.exists(emb_path) or pid not in self.feature_map:
             return None
-
         embeddings = torch.load(emb_path)
         features = torch.tensor(self.feature_map[pid])
         if embeddings.shape[0] != features.shape[0]:
             return None
-
         x = torch.cat([embeddings, features], dim=1)
         length = x.shape[0]
         if length > MAX_SEQ_LEN:
@@ -141,12 +139,10 @@ class ProteinFunctionDataset(Dataset):
             pad_len = MAX_SEQ_LEN - length
             x = F.pad(x, (0, 0, 0, pad_len))
             mask = torch.cat([torch.ones(length), torch.zeros(pad_len)])
-
         y = torch.zeros(len(self.go_vocab))
         for term in go_terms:
             if term in self.go_vocab:
                 y[self.go_vocab[term]] = 1.0
-
         return x, mask, y
 
 def collate_fn(batch):
@@ -179,7 +175,6 @@ def semantic_distance(y_true, y_pred, graph):
 def evaluate(model, dataloader, go_graph, threshold=0.5, go_vocab=None):
     model.eval()
     all_preds, all_true = [], []
-
     with torch.no_grad():
         for batch in dataloader:
             if batch is None:
@@ -190,17 +185,13 @@ def evaluate(model, dataloader, go_graph, threshold=0.5, go_vocab=None):
             labels = y.cpu().numpy()
             all_preds.append(preds)
             all_true.append(labels)
-
     all_preds = np.vstack(all_preds)
     all_true = np.vstack(all_true)
     binarized_preds = (all_preds > threshold).astype(int)
-
     precision = precision_score(all_true, binarized_preds, average='samples', zero_division=0)
     recall = recall_score(all_true, binarized_preds, average='samples', zero_division=0)
     f1 = f1_score(all_true, binarized_preds, average='samples', zero_division=0)
-
     smin = semantic_distance(all_true, binarized_preds, go_graph)
-
     print(f"Precision: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}, Smin: {smin:.4f}")
     return precision, recall, f1, smin
 
@@ -208,7 +199,6 @@ def save_predictions_to_csv(model, dataloader, go_vocab, output_path, threshold=
     model.eval()
     pred_list = []
     inv_vocab = {v: k for k, v in go_vocab.items()}
-
     with torch.no_grad():
         for batch in dataloader:
             if batch is None:
@@ -216,26 +206,22 @@ def save_predictions_to_csv(model, dataloader, go_vocab, output_path, threshold=
             x, mask, _ = [b.to(DEVICE) for b in batch]
             logits = model(x, mask)
             probs = torch.sigmoid(logits).cpu().numpy()
-
             for p in probs:
                 if len(pred_list) == 5000 or len(pred_list) % 100000 == 0:
                     print(f"Predicted for {len(pred_list)} proteins...")
                 pred_terms = [inv_vocab[i] for i in range(len(p)) if p[i] > threshold]
                 pred_list.append(";".join(pred_terms))
-
     matched_file = os.path.join(DATA_DIR, "matched_ids_with_go.txt")
     ids = []
     with open(matched_file) as f:
         for line in f:
             pid = line.strip().split("\t")[0]
             ids.append(pid)
-
     with open(os.path.join(DATA_DIR, "proteinext_predictions.csv"), "w", newline="") as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(["Protein_ID", "Predicted_GO_Terms"])
         for pid, preds in zip(ids[:len(pred_list)], pred_list):
             writer.writerow([pid, preds])
-
     print(f"Predictions saved to {os.path.join(DATA_DIR, 'proteinext_predictions.csv')}")
 
 def train():
@@ -248,25 +234,16 @@ def train():
                 for term in go_str.split(";"):
                     if term not in go_vocab:
                         go_vocab[term] = len(go_vocab)
-
     go_info = parse_go_obo(OBO_FILE)
     go_graph = build_go_graph(go_info)
 
-    raw_dataset = ProteinFunctionDataset(
-        matched_file,
-        os.path.join(DATA_DIR, "esm3_embeddings"),
-        os.path.join(DATA_DIR, "protein_features.txt"),
-        go_vocab
-    )
-    valid_ids = [x[0] for x in raw_dataset if x is not None]
+    raw_dataset = ProteinFunctionDataset(matched_file, os.path.join(DATA_DIR, "esm3_embeddings"), os.path.join(DATA_DIR, "protein_features.txt"), go_vocab)
+    valid_ids = [raw_dataset.matched[i][0] for i in range(len(raw_dataset)) if raw_dataset[i] is not None]
     print(f"Total valid proteins in dataset: {len(valid_ids)}")
     train_ids, test_ids = train_test_split(valid_ids, test_size=0.3, random_state=42)
-        [x[0] for x in ProteinFunctionDataset(matched_file, os.path.join(DATA_DIR, "esm3_embeddings"), os.path.join(DATA_DIR, "protein_features.txt"), go_vocab)],
-        test_size=0.3, random_state=42
-    )
-    full_dataset = ProteinFunctionDataset(matched_file, os.path.join(DATA_DIR, "esm3_embeddings"), os.path.join(DATA_DIR, "protein_features.txt"), go_vocab)
-    train_dataset = [full_dataset[i] for i in range(len(full_dataset)) if full_dataset[i] is not None and full_dataset.matched[i][0] in train_ids]
-    test_dataset = [full_dataset[i] for i in range(len(full_dataset)) if full_dataset[i] is not None and full_dataset.matched[i][0] in test_ids]
+
+    train_dataset = [raw_dataset[i] for i in range(len(raw_dataset)) if raw_dataset[i] is not None and raw_dataset.matched[i][0] in train_ids]
+    test_dataset = [raw_dataset[i] for i in range(len(raw_dataset)) if raw_dataset[i] is not None and raw_dataset.matched[i][0] in test_ids]
 
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn)
     test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn)
@@ -290,7 +267,6 @@ def train():
                 print(f"Epoch {epoch}, Step {i}, Loss: {loss.item():.4f}")
         print(f"Evaluating after epoch {epoch}:")
         evaluate(model, test_loader, go_graph, go_vocab=go_vocab)
-
         torch.save(model.state_dict(), os.path.join(DATA_DIR, f"proteinext_bigbird_epoch{epoch}.pt"))
 
     save_predictions_to_csv(model, test_loader, go_vocab, DATA_DIR)
