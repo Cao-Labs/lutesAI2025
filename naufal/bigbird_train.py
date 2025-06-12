@@ -1,5 +1,5 @@
 
-# Proteinext 2.0 Training Script 
+# Proteinext 2.0 Training Script - Fully Cleaned and Fixed
 
 import os
 import torch
@@ -129,16 +129,15 @@ class ProteinFunctionDataset(Dataset):
         embeddings = torch.load(emb_path)
         features = torch.tensor(self.feature_map[pid])
         if features.dim() == 3:
-            features = features.squeeze()  # squeeze extra dim if needed
-        if embeddings.shape[0] != features.shape[0]:
-            return None
+            features = features.squeeze()
         if embeddings.dim() == 3:
-            embeddings = embeddings.squeeze()  # just in case
+            embeddings = embeddings.squeeze()
         if features.dim() != 2 or embeddings.dim() != 2:
             return None
-
-x = torch.cat([embeddings, features], dim=1)
-
+        if embeddings.shape[0] != features.shape[0]:
+            return None
+            return None
+        x = torch.cat([embeddings, features], dim=1)
         length = x.shape[0]
         if length > MAX_SEQ_LEN:
             x = x[:MAX_SEQ_LEN]
