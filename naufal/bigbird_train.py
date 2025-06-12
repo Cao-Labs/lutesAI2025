@@ -2,6 +2,8 @@
 # Proteinext 2.0 - Memory-Efficient BigBird Training with Attention Pooling and GO Hierarchy
 
 import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
