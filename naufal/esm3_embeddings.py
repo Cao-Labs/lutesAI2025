@@ -53,6 +53,6 @@ for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
     except Exception as e:
         print(f"Error processing {seq_id}: {e}")
 
-print(f"Done. Structure embeddings saved in: {OUTPUT_DIR}")
+print(f"Done. Sequence embeddings saved in: {OUTPUT_DIR}")
 
 
