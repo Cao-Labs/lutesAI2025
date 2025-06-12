@@ -240,7 +240,6 @@ def evaluate_model(model, dataloader, device, mlb, output_csv):
     csv_path = os.path.join(OUTPUT_DIR, output_csv)
     with open(csv_path, "w") as f:
         f.write("ProteinID,PredictedGO\n")
-")
         for pid, pred in zip(ids, predictions):
             terms = [mlb.classes_[j] for j in range(len(pred)) if pred[j] == 1]
             f.write(f"{pid},{';'.join(terms)}\n")
