@@ -1,4 +1,5 @@
-# Proteinext 2.0 Training Script with BigBird, Attention Pooling, GO Hierarchy, and Human Interpretation
+# Proteinext 2.0 Training Script
+
 
 import os
 import torch
@@ -6,12 +7,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from transformers import BigBirdModel, BigBirdConfig
+from sklearn.metrics import precision_score, recall_score, f1_score
+from sklearn.model_selection import train_test_split
+from collections import defaultdict
+import numpy as np
+import csv
 
 # Configuration
 DATA_DIR = "/data/summer2020/naufal"
 MAX_SEQ_LEN = 1024
 BATCH_SIZE = 1
-INPUT_DIM = 1282  # ESM-3 (1280) + shape + RSA
+INPUT_DIM = 1282
 HIDDEN_DIM = 512
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 OBO_FILE = "/data/shared/databases/UniProt2025/GO_June_1_2025.obo"
@@ -79,32 +85,6 @@ class ProteinBigBirdWithAttention(nn.Module):
         pooled = self.attn_pool(outputs.last_hidden_state, attention_mask)
         return self.classifier(pooled)
 
-def interpret_go_terms(go_ids, go_dict):
-    return [{
-        "id": go,
-        "name": go_dict[go].get('name', 'UNKNOWN'),
-        "namespace": go_dict[go].get('namespace', ''),
-        "definition": go_dict[go].get('definition', '')
-    } for go in go_ids if go in go_dict]
-
-def train():
-    go_vocab = {}
-    with open(os.path.join(DATA_DIR, "matched_ids_with_go.txt")) as f:
-        for line in f:
-            _, go_str = line.strip().split("\t")
-            if go_str != "NA":
-                for term in go_str.split(";"):
-                    if term not in go_vocab:
-                        go_vocab[term] = len(go_vocab)
-
-    print(f"GO vocabulary size: {len(go_vocab)}")
-    print("Model ready for training. Data loader and full training loop should follow here.")
-
-
-from sklearn.metrics import precision_score, recall_score, f1_score
-import numpy as np
-
-# Dataset class (memory efficient)
 class ProteinFunctionDataset(Dataset):
     def __init__(self, matched_ids_file, embeddings_dir, features_file, label_vocab):
         self.matched = []
@@ -169,7 +149,6 @@ class ProteinFunctionDataset(Dataset):
 
         return x, mask, y
 
-
 def collate_fn(batch):
     batch = [b for b in batch if b is not None]
     if not batch:
@@ -177,98 +156,6 @@ def collate_fn(batch):
     x, mask, y = zip(*batch)
     return torch.stack(x), torch.stack(mask), torch.stack(y)
 
-
-# Evaluation metrics
-def evaluate(model, dataloader, threshold=0.5):
-    model.eval()
-    all_preds = []
-    all_true = []
-
-    with torch.no_grad():
-        for batch in dataloader:
-            if batch is None:
-                continue
-            x, mask, y = [b.to(DEVICE) for b in batch]
-            logits = model(x, mask)
-            preds = torch.sigmoid(logits).cpu().numpy()
-            labels = y.cpu().numpy()
-            all_preds.append(preds)
-            all_true.append(labels)
-
-    all_preds = np.vstack(all_preds)
-    all_true = np.vstack(all_true)
-
-    binarized_preds = (all_preds > threshold).astype(int)
-
-    precision = precision_score(all_true, binarized_preds, average='samples', zero_division=0)
-    recall = recall_score(all_true, binarized_preds, average='samples', zero_division=0)
-    f1 = f1_score(all_true, binarized_preds, average='samples', zero_division=0)
-
-    # Semantic distance (Smin) placeholder – requires GO DAG comparison
-    s_min = "Not implemented (requires DAG)"
-
-    print(f"Precision: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}, Smin: {s_min}")
-    return precision, recall, f1
-
-# Updated train() function with evaluation
-def train():
-    go_vocab = {}
-    with open(os.path.join(DATA_DIR, "matched_ids_with_go.txt")) as f:
-        for line in f:
-            _, go_str = line.strip().split("\t")
-            if go_str != "NA":
-                for term in go_str.split(";"):
-                    if term not in go_vocab:
-                        go_vocab[term] = len(go_vocab)
-
-    dataset = ProteinFunctionDataset(
-        matched_ids_file=os.path.join(DATA_DIR, "matched_ids_with_go.txt"),
-        embeddings_dir=os.path.join(DATA_DIR, "esm3_embeddings"),
-        features_file=os.path.join(DATA_DIR, "protein_features.txt"),
-        label_vocab=go_vocab,
-    )
-    dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn)
-
-    model = ProteinBigBirdWithAttention(input_dim=INPUT_DIM, hidden_dim=HIDDEN_DIM, num_labels=len(go_vocab)).to(DEVICE)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
-    criterion = nn.BCEWithLogitsLoss()
-
-    model.train()
-    for epoch in range(5):
-        for i, batch in enumerate(dataloader):
-            if batch is None:
-                continue
-            x, mask, y = [b.to(DEVICE) for b in batch]
-
-            optimizer.zero_grad()
-            logits = model(x, mask)
-            loss = criterion(logits, y)
-            loss.backward()
-            optimizer.step()
-
-            if i % 50 == 0:
-                print(f"Epoch {epoch}, Step {i}, Loss: {loss.item():.4f}")
-
-        print(f"Evaluating after epoch {epoch}:")
-        evaluate(model, dataloader)
-
-    print("Training complete.")
-
-
-from sklearn.model_selection import train_test_split
-from collections import defaultdict
-
-# === Train/Test Split ===
-def load_split_ids(matched_file, test_ratio=0.3):
-    ids = []
-    with open(matched_file) as f:
-        for line in f:
-            pid = line.strip().split("\t")[0]
-            ids.append(pid)
-    train_ids, test_ids = train_test_split(ids, test_size=test_ratio, random_state=42)
-    return set(train_ids), set(test_ids)
-
-# === S-min Calculation (simplified using GO DAG depth approximation) ===
 def build_go_graph(go_dict):
     graph = defaultdict(list)
     for term, data in go_dict.items():
@@ -276,18 +163,7 @@ def build_go_graph(go_dict):
             graph[term].append(parent)
     return graph
 
-def get_ancestors(term, graph):
-    visited = set()
-    stack = [term]
-    while stack:
-        node = stack.pop()
-        if node not in visited:
-            visited.add(node)
-            stack.extend(graph.get(node, []))
-    return visited
-
 def semantic_distance(y_true, y_pred, graph):
-    # y_true and y_pred are binary vectors (0/1)
     s_values = []
     for true_vec, pred_vec in zip(y_true, y_pred):
         true_terms = {i for i, v in enumerate(true_vec) if v == 1}
@@ -300,7 +176,6 @@ def semantic_distance(y_true, y_pred, graph):
         s_values.append(s_val)
     return np.mean(s_values) if s_values else 1.0
 
-# === Evaluate with split and save checkpoint ===
 def evaluate(model, dataloader, go_graph, threshold=0.5, go_vocab=None):
     model.eval()
     all_preds, all_true = [], []
@@ -329,72 +204,9 @@ def evaluate(model, dataloader, go_graph, threshold=0.5, go_vocab=None):
     print(f"Precision: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}, Smin: {smin:.4f}")
     return precision, recall, f1, smin
 
-# === Updated train() ===
-def train():
-    matched_file = os.path.join(DATA_DIR, "matched_ids_with_go.txt")
-    train_ids, test_ids = load_split_ids(matched_file)
-
-    go_vocab = {}
-    with open(matched_file) as f:
-        for line in f:
-            _, go_str = line.strip().split("\t")
-            if go_str != "NA":
-                for term in go_str.split(";"):
-                    if term not in go_vocab:
-                        go_vocab[term] = len(go_vocab)
-
-    go_info = parse_go_obo(OBO_FILE)
-    go_graph = build_go_graph(go_info)
-
-    full_dataset = ProteinFunctionDataset(
-        matched_ids_file=matched_file,
-        embeddings_dir=os.path.join(DATA_DIR, "esm3_embeddings"),
-        features_file=os.path.join(DATA_DIR, "protein_features.txt"),
-        label_vocab=go_vocab,
-    )
-
-    # Custom split logic
-    train_subset = [x for x in full_dataset if x and x[0].shape[0] > 0 and full_dataset.matched[full_dataset.matched.index((x[0],))][0] in train_ids]
-    test_subset = [x for x in full_dataset if x and x[0].shape[0] > 0 and full_dataset.matched[full_dataset.matched.index((x[0],))][0] in test_ids]
-
-    train_loader = DataLoader(train_subset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn)
-    test_loader = DataLoader(test_subset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn)
-
-    model = ProteinBigBirdWithAttention(input_dim=INPUT_DIM, hidden_dim=HIDDEN_DIM, num_labels=len(go_vocab)).to(DEVICE)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
-    criterion = nn.BCEWithLogitsLoss()
-
-    model.train()
-    for epoch in range(5):
-        for i, batch in enumerate(train_loader):
-            if batch is None:
-                continue
-            x, mask, y = [b.to(DEVICE) for b in batch]
-            optimizer.zero_grad()
-            logits = model(x, mask)
-            loss = criterion(logits, y)
-            loss.backward()
-            optimizer.step()
-            if i % 50 == 0:
-                print(f"Epoch {epoch}, Step {i}, Loss: {loss.item():.4f}")
-
-        print(f"Evaluating after epoch {epoch}:")
-        evaluate(model, test_loader, go_graph, go_vocab=go_vocab)
-
-        # Save checkpoint
-        checkpoint_path = os.path.join(DATA_DIR, f"proteinext_bigbird_epoch{epoch}.pt")
-        torch.save(model.state_dict(), checkpoint_path)
-        print(f"Checkpoint saved: {checkpoint_path}")
-
-
-import csv
-
-# Save predictions to CSV after final epoch
 def save_predictions_to_csv(model, dataloader, go_vocab, output_path, threshold=0.5):
     model.eval()
-    id_list = []
     pred_list = []
-
     inv_vocab = {v: k for k, v in go_vocab.items()}
 
     with torch.no_grad():
@@ -409,7 +221,6 @@ def save_predictions_to_csv(model, dataloader, go_vocab, output_path, threshold=
                 pred_terms = [inv_vocab[i] for i in range(len(p)) if p[i] > threshold]
                 pred_list.append(";".join(pred_terms))
 
-    # Re-fetch IDs to align with test set
     matched_file = os.path.join(DATA_DIR, "matched_ids_with_go.txt")
     ids = []
     with open(matched_file) as f:
@@ -425,4 +236,54 @@ def save_predictions_to_csv(model, dataloader, go_vocab, output_path, threshold=
 
     print(f"Predictions saved to {os.path.join(DATA_DIR, 'proteinext_predictions.csv')}")
 
+def train():
+    matched_file = os.path.join(DATA_DIR, "matched_ids_with_go.txt")
+    go_vocab = {}
+    with open(matched_file) as f:
+        for line in f:
+            _, go_str = line.strip().split("\t")
+            if go_str != "NA":
+                for term in go_str.split(";"):
+                    if term not in go_vocab:
+                        go_vocab[term] = len(go_vocab)
+
+    go_info = parse_go_obo(OBO_FILE)
+    go_graph = build_go_graph(go_info)
+
+    train_ids, test_ids = train_test_split(
+        [x[0] for x in ProteinFunctionDataset(matched_file, os.path.join(DATA_DIR, "esm3_embeddings"), os.path.join(DATA_DIR, "protein_features.txt"), go_vocab)],
+        test_size=0.3, random_state=42
+    )
+    full_dataset = ProteinFunctionDataset(matched_file, os.path.join(DATA_DIR, "esm3_embeddings"), os.path.join(DATA_DIR, "protein_features.txt"), go_vocab)
+    train_dataset = [full_dataset[i] for i in range(len(full_dataset)) if full_dataset[i] is not None and full_dataset.matched[i][0] in train_ids]
+    test_dataset = [full_dataset[i] for i in range(len(full_dataset)) if full_dataset[i] is not None and full_dataset.matched[i][0] in test_ids]
+
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn)
+    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn)
+
+    model = ProteinBigBirdWithAttention(INPUT_DIM, HIDDEN_DIM, len(go_vocab)).to(DEVICE)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
+    criterion = nn.BCEWithLogitsLoss()
+
+    for epoch in range(5):
+        model.train()
+        for i, batch in enumerate(train_loader):
+            if batch is None:
+                continue
+            x, mask, y = [b.to(DEVICE) for b in batch]
+            optimizer.zero_grad()
+            logits = model(x, mask)
+            loss = criterion(logits, y)
+            loss.backward()
+            optimizer.step()
+            if i % 50 == 0:
+                print(f"Epoch {epoch}, Step {i}, Loss: {loss.item():.4f}")
+        print(f"Evaluating after epoch {epoch}:")
+        evaluate(model, test_loader, go_graph, go_vocab=go_vocab)
+
+        torch.save(model.state_dict(), os.path.join(DATA_DIR, f"proteinext_bigbird_epoch{epoch}.pt"))
+
     save_predictions_to_csv(model, test_loader, go_vocab, DATA_DIR)
+
+if __name__ == "__main__":
+    train()
