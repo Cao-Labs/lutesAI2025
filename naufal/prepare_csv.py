@@ -3,17 +3,15 @@ import json
 import pandas as pd
 import torch
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
 
 # Config
 DATA_DIR = "/data/summer2020/naufal"
 EMBEDDING_DIR = os.path.join(DATA_DIR, "esm3_embeddings")
 FEATURE_FILE = os.path.join(DATA_DIR, "protein_features.txt")
-CSV_OUTPUT = os.path.join(DATA_DIR, "merged_features.csv")
-LOG_FILE = os.path.join(DATA_DIR, "skipped_proteins.log")
+CSV_OUTPUT = os.path.join(DATA_DIR, "esm3_fixed_embeddings.csv")
 MAX_LEN = 1024
 
-# Step 1: Parse secondary structure file
+# Step 1: Load secondary structure
 print("Loading secondary structure...")
 feature_map = {}
 current_id = None
@@ -33,10 +31,10 @@ with open(FEATURE_FILE) as f:
 if current_id and current_features:
     feature_map[current_id] = current_features
 
-# Step 2: Combine embeddings + secondary structure and save to CSV
-print("Merging and writing to CSV...")
+# Step 2: Fix embeddings and save to CSV
+print("Fixing and saving embeddings to CSV...")
 records = []
-skipped_logs = []
+skipped = []
 
 for filename in os.listdir(EMBEDDING_DIR):
     if not filename.endswith(".pt"):
@@ -44,16 +42,16 @@ for filename in os.listdir(EMBEDDING_DIR):
     pid = filename.replace(".pt", "")
     emb_path = os.path.join(EMBEDDING_DIR, filename)
     if pid not in feature_map:
-        skipped_logs.append(f"{pid} skipped: no structure found")
+        skipped.append(f"{pid} skipped: no structure found")
         continue
 
     embedding = torch.load(emb_path)
 
-    # Ensure 2D embedding
+    # Squeeze batch dim if needed
     if embedding.dim() == 3 and embedding.shape[0] == 1:
         embedding = embedding.squeeze(0)
     elif embedding.dim() == 3:
-        skipped_logs.append(f"{pid} skipped: unexpected embedding shape {embedding.shape}")
+        skipped.append(f"{pid} skipped: unexpected embedding shape {embedding.shape}")
         continue
 
     structure = torch.tensor(feature_map[pid])
@@ -61,63 +59,36 @@ for filename in os.listdir(EMBEDDING_DIR):
     if structure.dim() == 3 and structure.shape[0] == 1:
         structure = structure.squeeze(0)
     elif structure.dim() == 3:
-        skipped_logs.append(f"{pid} skipped: unexpected structure shape {structure.shape}")
+        skipped.append(f"{pid} skipped: unexpected structure shape {structure.shape}")
         continue
 
     if embedding.shape[0] != structure.shape[0]:
-        skipped_logs.append(f"{pid} skipped: length mismatch {embedding.shape[0]} vs {structure.shape[0]}")
+        skipped.append(f"{pid} skipped: length mismatch {embedding.shape[0]} vs {structure.shape[0]}")
         continue
 
     combined = torch.cat([embedding, structure], dim=1)
-    record = {
+
+    # Pad or truncate
+    length = combined.shape[0]
+    if length > MAX_LEN:
+        combined = combined[:MAX_LEN]
+    else:
+        pad_len = MAX_LEN - length
+        combined = F.pad(combined, (0, 0, 0, pad_len))  # pad rows
+
+    records.append({
         "ProteinID": pid,
         "Features": json.dumps(combined.tolist())
-    }
-    records.append(record)
+    })
 
+# Save CSV
 df = pd.DataFrame(records)
 df.to_csv(CSV_OUTPUT, index=False)
-print(f"Saved merged CSV: {CSV_OUTPUT}")
+print(f"Saved fixed embeddings CSV to: {CSV_OUTPUT}")
 
-# Save skipped logs
-with open(LOG_FILE, "w") as logf:
-    for line in skipped_logs:
+# Save skipped
+log_path = os.path.join(DATA_DIR, "esm3_skipped.log")
+with open(log_path, "w") as logf:
+    for line in skipped:
         logf.write(line + "\n")
-print(f"Skipped proteins logged to: {LOG_FILE}")
-
-# Step 3: Dataset class for BigBird
-class ProteinDataset(Dataset):
-    def __init__(self, csv_path, max_len=1024):
-        self.data = pd.read_csv(csv_path)
-        self.max_len = max_len
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        pid = self.data.iloc[idx]["ProteinID"]
-        features = json.loads(self.data.iloc[idx]["Features"])
-        x = torch.tensor(features, dtype=torch.float32)
-
-        length = x.shape[0]
-        if length > self.max_len:
-            x = x[:self.max_len]
-            mask = torch.ones(self.max_len)
-        else:
-            pad_len = self.max_len - length
-            x = F.pad(x, (0, 0, 0, pad_len))
-            mask = torch.cat([torch.ones(length), torch.zeros(pad_len)])
-
-        return x, mask, pid
-
-# Step 4: Example usage
-def create_dataloader(csv_file, batch_size=4):
-    dataset = ProteinDataset(csv_file, max_len=MAX_LEN)
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-    return loader
-
-# Uncomment to test the dataloader
-# loader = create_dataloader(CSV_OUTPUT)
-# for x, mask, pid in loader:
-#     print(f"Batch shape: {x.shape}, Mask shape: {mask.shape}")
-#     break
+print(f"Skipped proteins logged to: {log_path}")
