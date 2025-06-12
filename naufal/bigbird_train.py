@@ -1,21 +1,21 @@
-
-# Proteinext 2.0 - Memory-Efficient BigBird Training with Attention Pooling and GO Hierarchy
+# Proteinext 2.0 - Debugged, Filtered, and Verbose BigBird Training Script
 
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-import os
+
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from transformers import BigBirdModel
 from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import MultiLabelBinarizer
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import f1_score, precision_score, recall_score
 import numpy as np
 import csv
 from tqdm import tqdm
 from collections import defaultdict
-import torch.nn.functional as F
 
 # === Config ===
 DATA_DIR = "/data/summer2020/naufal"
@@ -58,14 +58,8 @@ def parse_go_obo(obo_path):
                 current['is_a'].append(parent_id)
     return go_info
 
-def build_go_graph(go_dict):
-    graph = defaultdict(list)
-    for term, data in go_dict.items():
-        for parent in data.get("parents", []):
-            graph[term].append(parent)
-    return graph
-
 # === Load GO Labels ===
+print("Loading GO term labels...")
 protein_to_go = {}
 all_go_terms = set()
 with open(GO_LABEL_FILE) as f:
@@ -74,6 +68,8 @@ with open(GO_LABEL_FILE) as f:
         if len(parts) != 2:
             continue
         pid, go_str = parts
+        if go_str == "NA":
+            continue
         terms = go_str.split(";")
         protein_to_go[pid] = terms
         all_go_terms.update(terms)
@@ -83,6 +79,7 @@ binary_labels = mlb.fit_transform([protein_to_go[pid] for pid in protein_to_go])
 label_map = {pid: binary_labels[i] for i, pid in enumerate(protein_to_go)}
 
 # === Load Secondary Structure ===
+print("Loading secondary structure features...")
 feature_map = {}
 current_id = None
 current_features = []
@@ -100,7 +97,7 @@ with open(FEATURE_FILE) as f:
 if current_id and current_features:
     feature_map[current_id] = current_features
 
-# === Dataset Class (Lazy Loading) ===
+# === Dataset ===
 class ProteinDataset(Dataset):
     def __init__(self, ids, label_map, feature_map, embedding_dir, input_dim):
         self.ids = ids
@@ -176,13 +173,12 @@ class ProteinBigBirdAttention(nn.Module):
         pooled = self.attn_pool(out.last_hidden_state, mask)
         return self.classifier(pooled)
 
-# === Train/Val Split
+# === Prepare Data
+print("Preparing dataset...")
 all_ids = list(protein_to_go.keys())
 train_ids, test_ids = train_test_split(all_ids, test_size=0.3, random_state=42)
-
 train_dataset = ProteinDataset(train_ids, label_map, feature_map, EMBEDDING_DIR, 1282)
 test_dataset = ProteinDataset(test_ids, label_map, feature_map, EMBEDDING_DIR, 1282)
-
 train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True, collate_fn=collate_fn)
 test_loader = DataLoader(test_dataset, batch_size=4, shuffle=False, collate_fn=collate_fn)
 
@@ -192,7 +188,7 @@ def train_model(model, dataloader, optimizer, criterion, scheduler, num_epochs, 
     for epoch in range(num_epochs):
         model.train()
         running_loss = 0.0
-        for batch in tqdm(dataloader, desc=f"Epoch {epoch+1}"):
+        for i, batch in enumerate(tqdm(dataloader, desc=f"Epoch {epoch+1}")):
             if batch is None:
                 continue
             x, mask, y = [b.to(device) for b in batch]
@@ -202,21 +198,60 @@ def train_model(model, dataloader, optimizer, criterion, scheduler, num_epochs, 
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
+
+            print(f"Step {i+1}: Loss = {loss.item():.6f}")
+            print(f"logits shape: {logits.shape}, y shape: {y.shape}")
+
         scheduler.step(running_loss)
         print(f"Epoch {epoch+1} loss: {running_loss:.4f}")
-        model_path = os.path.join(OUTPUT_DIR, f"bigbird_mem_efficient_epoch{epoch+1}.pt")
-        torch.save(model.state_dict(), model_path)
+        torch.save(model.state_dict(), os.path.join(OUTPUT_DIR, f"debug_bigbird_epoch{epoch+1}.pt"))
 
-# === GO Hierarchy (Optional future use)
-go_info = parse_go_obo(OBO_FILE)
-go_graph = build_go_graph(go_info)
+# === Evaluation
+def evaluate_model(model, dataloader, device, mlb, output_csv):
+    print("Evaluating model and exporting predictions...")
+    model.eval()
+    model.to(device)
+    predictions = []
+    true_labels = []
+    total = 0
 
-# === Train
+    with torch.no_grad():
+        for i, batch in enumerate(dataloader):
+            if batch is None:
+                continue
+            x, mask, y = [b.to(device) for b in batch]
+            logits = model(x, mask)
+            probs = torch.sigmoid(logits).cpu().numpy()
+            preds = (probs > 0.5).astype(int)
+            predictions.extend(preds)
+            true_labels.extend(y.cpu().numpy())
+
+            for p in probs:
+                if total == 0 or total % 50000 == 0:
+                    print(f"Prediction {total + 1} written")
+                total += 1
+
+    precision = precision_score(true_labels, predictions, average='samples', zero_division=0)
+    recall = recall_score(true_labels, predictions, average='samples', zero_division=0)
+    f1 = f1_score(true_labels, predictions, average='samples', zero_division=0)
+    print(f"Precision: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}")
+
+    ids = list(protein_to_go.keys())[-len(predictions):]
+    csv_path = os.path.join(OUTPUT_DIR, output_csv)
+    with open(csv_path, "w") as f:
+        f.write("ProteinID,PredictedGO
+")
+        for pid, pred in zip(ids, predictions):
+            terms = [mlb.classes_[j] for j in range(len(pred)) if pred[j] == 1]
+            f.write(f"{pid},{';'.join(terms)}\n")
+    print(f"CSV export complete: {csv_path}")
+
+# === Start training
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-num_classes = len(all_go_terms)
-model = ProteinBigBirdAttention(input_dim=1282, hidden_dim=768, num_classes=num_classes)
-criterion = nn.BCEWithLogitsLoss()
+model = ProteinBigBirdAttention(input_dim=1282, hidden_dim=768, num_classes=len(all_go_terms))
 optimizer = optim.Adam(model.parameters(), lr=1e-5)
+criterion = nn.BCEWithLogitsLoss()
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=2)
 
 train_model(model, train_loader, optimizer, criterion, scheduler, num_epochs=5, device=device)
+evaluate_model(model, test_loader, device, mlb, output_csv="predictions.csv")
