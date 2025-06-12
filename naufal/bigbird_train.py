@@ -1,4 +1,4 @@
-# Proteinext 2.0 Training Script with all fixes
+# Proteinext 2.0 Training Script 
 
 
 import os
@@ -252,18 +252,18 @@ def train():
     go_info = parse_go_obo(OBO_FILE)
     go_graph = build_go_graph(go_info)
 
-raw_dataset = ProteinFunctionDataset(
-    matched_file,
-    os.path.join(DATA_DIR, "esm3_embeddings"),
-    os.path.join(DATA_DIR, "protein_features.txt"),
-    go_vocab
-)
-
-valid_ids = [x[0] for x in raw_dataset if x is not None]
-print(f"Total valid proteins in dataset: {len(valid_ids)}")
-
-train_ids, test_ids = train_test_split(valid_ids, test_size=0.3, random_state=42)
-
+    raw_dataset = ProteinFunctionDataset(
+        matched_file,
+        os.path.join(DATA_DIR, "esm3_embeddings"),
+        os.path.join(DATA_DIR, "protein_features.txt"),
+        go_vocab
+    )
+    valid_ids = [x[0] for x in raw_dataset if x is not None]
+    print(f"Total valid proteins in dataset: {len(valid_ids)}")
+    train_ids, test_ids = train_test_split(valid_ids, test_size=0.3, random_state=42)
+        [x[0] for x in ProteinFunctionDataset(matched_file, os.path.join(DATA_DIR, "esm3_embeddings"), os.path.join(DATA_DIR, "protein_features.txt"), go_vocab)],
+        test_size=0.3, random_state=42
+    )
     full_dataset = ProteinFunctionDataset(matched_file, os.path.join(DATA_DIR, "esm3_embeddings"), os.path.join(DATA_DIR, "protein_features.txt"), go_vocab)
     train_dataset = [full_dataset[i] for i in range(len(full_dataset)) if full_dataset[i] is not None and full_dataset.matched[i][0] in train_ids]
     test_dataset = [full_dataset[i] for i in range(len(full_dataset)) if full_dataset[i] is not None and full_dataset.matched[i][0] in test_ids]
