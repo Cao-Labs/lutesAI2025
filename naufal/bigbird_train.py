@@ -218,6 +218,8 @@ def save_predictions_to_csv(model, dataloader, go_vocab, output_path, threshold=
             probs = torch.sigmoid(logits).cpu().numpy()
 
             for p in probs:
+                if len(pred_list) == 5000 or len(pred_list) % 100000 == 0:
+                    print(f"Predicted for {len(pred_list)} proteins...")
                 pred_terms = [inv_vocab[i] for i in range(len(p)) if p[i] > threshold]
                 pred_list.append(";".join(pred_terms))
 
@@ -255,7 +257,6 @@ def train():
         test_size=0.3, random_state=42
     )
     full_dataset = ProteinFunctionDataset(matched_file, os.path.join(DATA_DIR, "esm3_embeddings"), os.path.join(DATA_DIR, "protein_features.txt"), go_vocab)
-    print(f"Total valid proteins in dataset: {len(full_dataset)}")
     train_dataset = [full_dataset[i] for i in range(len(full_dataset)) if full_dataset[i] is not None and full_dataset.matched[i][0] in train_ids]
     test_dataset = [full_dataset[i] for i in range(len(full_dataset)) if full_dataset[i] is not None and full_dataset.matched[i][0] in test_ids]
 
