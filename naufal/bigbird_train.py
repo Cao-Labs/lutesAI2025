@@ -264,7 +264,6 @@ print(f"Total valid proteins in dataset: {len(valid_ids)}")
 
 train_ids, test_ids = train_test_split(valid_ids, test_size=0.3, random_state=42)
 
-    )
     full_dataset = ProteinFunctionDataset(matched_file, os.path.join(DATA_DIR, "esm3_embeddings"), os.path.join(DATA_DIR, "protein_features.txt"), go_vocab)
     train_dataset = [full_dataset[i] for i in range(len(full_dataset)) if full_dataset[i] is not None and full_dataset.matched[i][0] in train_ids]
     test_dataset = [full_dataset[i] for i in range(len(full_dataset)) if full_dataset[i] is not None and full_dataset.matched[i][0] in test_ids]
