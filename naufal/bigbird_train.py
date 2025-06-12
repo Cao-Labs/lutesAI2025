@@ -385,3 +385,44 @@ def train():
         checkpoint_path = os.path.join(DATA_DIR, f"proteinext_bigbird_epoch{epoch}.pt")
         torch.save(model.state_dict(), checkpoint_path)
         print(f"Checkpoint saved: {checkpoint_path}")
+
+
+import csv
+
+# Save predictions to CSV after final epoch
+def save_predictions_to_csv(model, dataloader, go_vocab, output_path, threshold=0.5):
+    model.eval()
+    id_list = []
+    pred_list = []
+
+    inv_vocab = {v: k for k, v in go_vocab.items()}
+
+    with torch.no_grad():
+        for batch in dataloader:
+            if batch is None:
+                continue
+            x, mask, _ = [b.to(DEVICE) for b in batch]
+            logits = model(x, mask)
+            probs = torch.sigmoid(logits).cpu().numpy()
+
+            for p in probs:
+                pred_terms = [inv_vocab[i] for i in range(len(p)) if p[i] > threshold]
+                pred_list.append(";".join(pred_terms))
+
+    # Re-fetch IDs to align with test set
+    matched_file = os.path.join(DATA_DIR, "matched_ids_with_go.txt")
+    ids = []
+    with open(matched_file) as f:
+        for line in f:
+            pid = line.strip().split("\t")[0]
+            ids.append(pid)
+
+    with open(os.path.join(DATA_DIR, "proteinext_predictions.csv"), "w", newline="") as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(["Protein_ID", "Predicted_GO_Terms"])
+        for pid, preds in zip(ids[:len(pred_list)], pred_list):
+            writer.writerow([pid, preds])
+
+    print(f"Predictions saved to {os.path.join(DATA_DIR, 'proteinext_predictions.csv')}")
+
+    save_predictions_to_csv(model, test_loader, go_vocab, DATA_DIR)
