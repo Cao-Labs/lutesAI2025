@@ -10,6 +10,7 @@ DATA_DIR = "/data/summer2020/naufal"
 EMBEDDING_DIR = os.path.join(DATA_DIR, "esm3_embeddings")
 FEATURE_FILE = os.path.join(DATA_DIR, "protein_features.txt")
 CSV_OUTPUT = os.path.join(DATA_DIR, "merged_features.csv")
+LOG_FILE = os.path.join(DATA_DIR, "skipped_proteins.log")
 MAX_LEN = 1024
 
 # Step 1: Parse secondary structure file
@@ -35,21 +36,36 @@ if current_id and current_features:
 # Step 2: Combine embeddings + secondary structure and save to CSV
 print("Merging and writing to CSV...")
 records = []
+skipped_logs = []
+
 for filename in os.listdir(EMBEDDING_DIR):
     if not filename.endswith(".pt"):
         continue
     pid = filename.replace(".pt", "")
     emb_path = os.path.join(EMBEDDING_DIR, filename)
     if pid not in feature_map:
+        skipped_logs.append(f"{pid} skipped: no structure found")
         continue
 
     embedding = torch.load(emb_path)
+
+    # Ensure 2D embedding
+    if embedding.dim() == 3 and embedding.shape[0] == 1:
+        embedding = embedding.squeeze(0)
+    elif embedding.dim() == 3:
+        skipped_logs.append(f"{pid} skipped: unexpected embedding shape {embedding.shape}")
+        continue
+
     structure = torch.tensor(feature_map[pid])
-    if embedding.dim() == 3:
-        embedding = embedding.squeeze()
-    if structure.dim() == 3:
-        structure = structure.squeeze()
+
+    if structure.dim() == 3 and structure.shape[0] == 1:
+        structure = structure.squeeze(0)
+    elif structure.dim() == 3:
+        skipped_logs.append(f"{pid} skipped: unexpected structure shape {structure.shape}")
+        continue
+
     if embedding.shape[0] != structure.shape[0]:
+        skipped_logs.append(f"{pid} skipped: length mismatch {embedding.shape[0]} vs {structure.shape[0]}")
         continue
 
     combined = torch.cat([embedding, structure], dim=1)
@@ -62,6 +78,12 @@ for filename in os.listdir(EMBEDDING_DIR):
 df = pd.DataFrame(records)
 df.to_csv(CSV_OUTPUT, index=False)
 print(f"Saved merged CSV: {CSV_OUTPUT}")
+
+# Save skipped logs
+with open(LOG_FILE, "w") as logf:
+    for line in skipped_logs:
+        logf.write(line + "\n")
+print(f"Skipped proteins logged to: {LOG_FILE}")
 
 # Step 3: Dataset class for BigBird
 class ProteinDataset(Dataset):
