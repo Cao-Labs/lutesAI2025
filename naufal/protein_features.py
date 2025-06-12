@@ -11,7 +11,7 @@ from tempfile import NamedTemporaryFile
 structure_file = "/data/summer2020/naufal/protein_structures.txt"
 id_file = "/data/summer2020/naufal/matched_ids.txt"
 output_file = "/data/summer2020/naufal/protein_features.txt"
-dssp_exec = "/data/shared/tools/DeepQA/tools/dsspcmbi"  # Your professor's installed DSSP
+dssp_exec = "/data/shared/tools/DeepQA/tools/dsspcmbi"  # Dr. Cao's installed DSSP
 
 # === Load internal UniProt IDs ===
 with open(id_file, "r") as f:
