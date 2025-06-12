@@ -1,4 +1,4 @@
 import torch
 
-data = torch.load("your_file.pt", map_location='cpu')
+data = torch.load("AT10A_HUMAN.pt", map_location='cpu')
 print(len(data))
