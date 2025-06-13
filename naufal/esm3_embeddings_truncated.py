@@ -29,7 +29,7 @@ def fasta_reader(fasta_path):
         if identifier:
             yield identifier, "".join(sequence)
 
-# Max sequence length
+# Max sequence length allowed
 MAX_LENGTH = 30000
 
 # Process each protein sequence
@@ -39,9 +39,9 @@ for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
         print(f"Skipping {seq_id} (invalid sequence)")
         continue
 
-    if len(seq) > MAX_LENGTH:
-        print(f"Truncating {seq_id} from {len(seq)} to {MAX_LENGTH} residues")
-        seq = seq[:MAX_LENGTH]
+    if len(seq) >= MAX_LENGTH:
+        print(f"Skipping {seq_id} ({len(seq)} residues — exceeds limit of {MAX_LENGTH})")
+        continue
 
     try:
         # Wrap sequence as ESMProtein
@@ -50,8 +50,9 @@ for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
         # Generate structure from sequence
         protein = model.generate(protein, GenerationConfig(track="structure", num_steps=8))
 
-        # Save coordinates as a tensor
-        coords = torch.tensor(protein.coordinates)  # shape: [L, 3, 3]
+        # Save coordinates as a tensor with values rounded to 3 decimal places
+        coords = torch.tensor(protein.coordinates)
+        coords = torch.round(coords * 1000) / 1000  # round to 3 decimal places
         torch.save(coords, os.path.join(OUTPUT_DIR, f"{seq_id}.pt"))
 
         if idx % 100 == 0:
