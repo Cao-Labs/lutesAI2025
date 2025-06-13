@@ -10,6 +10,17 @@ SEQ_LENGTH = 512
 REDUCED_DIM = 2
 BATCH_SIZE = 5000  # Number of residues per PCA batch
 
+# SAFETY CHECK: ensure tensor is 2D
+def ensure_2d(embedding_tensor, filename):
+    if embedding_tensor.ndim == 3:
+        if embedding_tensor.shape[-1] == 1:
+            embedding_tensor = embedding_tensor.squeeze(-1)
+        else:
+            raise ValueError(f"File {filename} has shape {embedding_tensor.shape}, expected last dim to be 1.")
+    elif embedding_tensor.ndim != 2:
+        raise ValueError(f"File {filename} has unexpected shape {embedding_tensor.shape}, expected 2D.")
+    return embedding_tensor
+
 # STEP 1: Gather all .pt files
 embedding_files = [f for f in os.listdir(INPUT_DIR) if f.endswith(".pt")]
 print(f"Found {len(embedding_files)} files.")
@@ -23,14 +34,9 @@ batch_count = 0
 print("Starting PCA fitting...")
 for idx, fname in enumerate(embedding_files):
     emb = torch.load(os.path.join(INPUT_DIR, fname))
-    if emb.ndim == 3:
-        emb = emb.squeeze(-1)
-    elif emb.ndim != 2:
-        raise ValueError(f"Unexpected shape: {emb.shape}")
-    
+    emb = ensure_2d(emb, fname)
     batch.append(emb.numpy())
 
-    # When batch is large enough, fit
     if sum(b.shape[0] for b in batch) >= BATCH_SIZE:
         combined = np.vstack(batch)
         ipca.partial_fit(combined)
@@ -38,26 +44,24 @@ for idx, fname in enumerate(embedding_files):
         print(f"PCA batch {batch_count} fitted with {combined.shape[0]} residues")
         batch = []
 
-# Fit final batch if any
+# Fit remaining batch if any
 if batch:
     combined = np.vstack(batch)
     ipca.partial_fit(combined)
     batch_count += 1
     print(f"PCA batch {batch_count} fitted with {combined.shape[0]} residues")
-    batch = []
 
 print("PCA fitting complete.")
 
-# STEP 4: Second pass — transform, pad/truncate, save
+# STEP 4: Transform each file, pad/truncate to fixed length
 processed = {}
 print("Transforming and saving embeddings...")
 for idx, fname in enumerate(embedding_files):
     emb = torch.load(os.path.join(INPUT_DIR, fname))
-    if emb.ndim == 3:
-        emb = emb.squeeze(-1)
+    emb = ensure_2d(emb, fname)
     reduced = ipca.transform(emb.numpy())  # shape: [L, 2]
 
-    # Pad or truncate to fixed length
+    # Truncate or pad to SEQ_LENGTH
     L = reduced.shape[0]
     if L >= SEQ_LENGTH:
         final = reduced[:SEQ_LENGTH]
@@ -67,10 +71,11 @@ for idx, fname in enumerate(embedding_files):
 
     processed[fname] = torch.tensor(final, dtype=torch.float32)
 
-    if (idx + 1) % 500 == 0:
-        print(f"Transformed {idx + 1} / {len(embedding_files)} files...")
+    if (idx + 1) % 500 == 0 or idx == len(embedding_files) - 1:
+        print(f"Processed {idx + 1} / {len(embedding_files)} files")
 
-# Save result
+# STEP 5: Save all to a single file
 torch.save(processed, OUTPUT_FILE)
-print(f"Done. Saved to {OUTPUT_FILE}")
+print(f"Done. Embeddings saved to {OUTPUT_FILE}")
+
 
