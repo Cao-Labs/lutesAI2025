@@ -8,9 +8,9 @@ FASTA_FILE = "/data/summer2020/naufal/protein_sequences.fasta"
 OUTPUT_DIR = "/data/summer2020/naufal/esm3_embeddings_truncated"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Load ESM-3 model from Hugging Face (must have token set via huggingface-cli login or env var)
-print("Loading ESM-3 model...")
-model: ESM3InferenceClient = ESM3.from_pretrained("esm3-open").to("cuda")  # use "cpu" if no GPU
+# Load ESM-3 model from Hugging Face (initially on GPU)
+print("Loading ESM-3 model on GPU...")
+model: ESM3InferenceClient = ESM3.from_pretrained("esm3-open").to("cuda")
 
 # Generator to read sequences one at a time
 def fasta_reader(fasta_path):
@@ -44,13 +44,22 @@ for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
         continue
 
     try:
-        # Wrap sequence as ESMProtein
         protein = ESMProtein(sequence=seq)
 
-        # Generate structure from sequence
-        protein = model.generate(protein, GenerationConfig(track="structure", num_steps=8))
+        try:
+            # Attempt generation on GPU
+            protein = model.generate(protein, GenerationConfig(track="structure", num_steps=8))
 
-        # Save coordinates as a tensor with values rounded to 3 decimal places
+        except RuntimeError as e:
+            if "CUDA out of memory" in str(e):
+                print(f"CUDA OOM for {seq_id}. Retrying on CPU...")
+                torch.cuda.empty_cache()
+                model = model.to("cpu")
+                protein = model.generate(protein, GenerationConfig(track="structure", num_steps=8))
+            else:
+                raise  # Re-raise if it's not a CUDA OOM error
+
+        # Save rounded coordinates
         coords = torch.tensor(protein.coordinates)
         coords = torch.round(coords * 1000) / 1000  # round to 3 decimal places
         torch.save(coords, os.path.join(OUTPUT_DIR, f"{seq_id}.pt"))
