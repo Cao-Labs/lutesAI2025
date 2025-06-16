@@ -13,7 +13,7 @@ model: ESM3InferenceClient = ESM3.from_pretrained("esm3-open").to("cuda")
 
 # File paths
 FASTA_FILE = "/data/summer2020/naufal/protein_sequences.fasta"
-OUTPUT_DIR = "/data/summer2020/naufal/esm3_sequence_embeddings"
+OUTPUT_DIR = "/data/summer2020/naufal/esm3_embeddings_new"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Constants
