@@ -5,7 +5,7 @@ from esm.sdk.api import ESM3InferenceClient, ESMProtein, GenerationConfig
 
 # Paths
 FASTA_FILE = "/data/summer2020/naufal/protein_sequences.fasta"
-OUTPUT_DIR = "/data/summer2020/naufal/esm3_embeddings"
+OUTPUT_DIR = "/data/summer2020/naufal/esm3_embeddings_new"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Load ESM-3 model from Hugging Face (must have token set via huggingface-cli login or env var)
