@@ -1,6 +1,5 @@
 import os
 import torch
-from esm.models.esm3 import ESM3
 from esm.sdk.api import ESM3InferenceClient, ESMProtein, GenerationConfig
 
 # Paths
@@ -8,9 +7,9 @@ FASTA_FILE = "/data/summer2020/naufal/protein_sequences.fasta"
 OUTPUT_DIR = "/data/summer2020/naufal/esm3_embeddings_new"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Load ESM-3 model (initially on GPU)
-print("Loading ESM-3 model on GPU...")
-model: ESM3InferenceClient = ESM3.from_pretrained("esm3-open").to("cuda")
+# Load the ESM-3 inference model (start with GPU)
+print("Loading ESM-3 inference model on GPU...")
+model = ESM3InferenceClient("esm3_t33_650M_UR50D").to("cuda")  # or "cpu" if no GPU
 
 # FASTA reader
 def fasta_reader(fasta_path):
@@ -29,7 +28,7 @@ def fasta_reader(fasta_path):
         if identifier:
             yield identifier, "".join(sequence)
 
-# Settings
+# Constants
 MAX_LENGTH = 30000
 
 # Process sequences
@@ -44,30 +43,27 @@ for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
         continue
 
     try:
-        # Wrap sequence
         protein = ESMProtein(sequence=seq)
 
         try:
-            # Run ESM-3 
+            # Run on GPU first
             output = model([protein], GenerationConfig())
 
         except RuntimeError as e:
             if "CUDA out of memory" in str(e):
-                print(f"CUDA OOM for {seq_id}, retrying on CPU...")
+                print(f"CUDA OOM for {seq_id}. Retrying on CPU...")
                 torch.cuda.empty_cache()
                 model = model.to("cpu")
                 output = model([protein], GenerationConfig())
             else:
                 raise
 
-        # Extract residue embeddings
+        # Extract residue-level sequence embeddings
         embedding = output[0].representations["residue"]  # shape: [L, D]
 
-        # Replace NaN and Inf with 0
+        # Clean: replace inf/nan, round to 3 decimals
         embedding[torch.isinf(embedding)] = 0.0
         embedding = torch.nan_to_num(embedding, nan=0.0)
-
-        # Round to 3 decimal places
         embedding = torch.round(embedding * 1000) / 1000
 
         # Save
@@ -80,6 +76,5 @@ for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
     except Exception as e:
         print(f"Error processing {seq_id}: {e}")
 
-print(f"Done. Sequence embeddings saved in: {OUTPUT_DIR}")
-
+print(f"Done. Embeddings saved to: {OUTPUT_DIR}")
 
