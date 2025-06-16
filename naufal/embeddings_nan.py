@@ -45,7 +45,7 @@ for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
 
     try:
         # Wrap sequence
-        protein = ESMProtein(sequence=seq, name=seq_id)
+        protein = ESMProtein(sequence=seq)
 
         try:
             # Run ESM-3 
