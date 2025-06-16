@@ -1,19 +1,16 @@
 import os
 import torch
-from huggingface_hub import login
 from esm.models.esm3 import ESM3
-from esm.sdk.api import ESMProtein
+from esm.sdk.api import ESMProtein, SamplingConfig
+from esm.utils.constants.models import ESM3_OPEN_SMALL
 
-# Authenticate (only needed once if you've already done huggingface-cli login)
-login()
-
-# Load model
+# Load the model client
 print("Loading ESM-3 model...")
-model = ESM3.from_pretrained("esm3-open").to("cuda")  # or "cpu"
+client = ESM3.from_pretrained(ESM3_OPEN_SMALL, device="cuda")
 
-# Paths
+# Input and output paths
 FASTA_FILE = "/data/summer2020/naufal/protein_sequences.fasta"
-OUTPUT_DIR = "/data/summer2020/naufal/esm3_embeddings_tryforward"
+OUTPUT_DIR = "/data/summer2020/naufal/esm3_embeddings_new"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # FASTA reader
@@ -32,42 +29,38 @@ def fasta_reader(path):
         if identifier:
             yield identifier, "".join(seq)
 
-# Try inference without generation
-print("Trying direct embedding inference without generation...")
+# Process sequences
+print("Processing sequences...")
 for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
+    if not seq or len(seq) >= 30000:
+        print(f"Skipping {seq_id} (invalid or too long)")
+        continue
+
     try:
-        if not seq or set(seq) == {"."}:
-            print(f"Skipping {seq_id} (invalid)")
-            continue
-
         protein = ESMProtein(sequence=seq)
+        protein_tensor = client.encode(protein)
 
-        # Attempt forward-like inference
-        output = model.infer(protein)
+        output = client.forward_and_sample(
+            protein_tensor,
+            SamplingConfig(return_per_residue_embeddings=True)
+        )
 
-        if hasattr(protein, "error"):
-            print(f"Error from model for {seq_id}: {protein.error}")
-            continue
+        emb = output.per_residue_embedding
+        emb = torch.tensor(emb)
 
-        if not hasattr(protein, "representations") or "sequence" not in protein.representations:
-            print(f"No sequence embedding found for {seq_id}, skipping.")
-            continue
+        # Clean NaNs and Infs
+        emb = torch.nan_to_num(emb, nan=0.0, posinf=0.0, neginf=0.0)
+        emb = torch.round(emb * 1000) / 1000  # Round to 3 decimal places
 
-        emb = protein.representations["sequence"]
-        emb_tensor = torch.tensor(emb)
-        emb_tensor = torch.nan_to_num(emb_tensor, nan=0.0)
-        emb_tensor[torch.isinf(emb_tensor)] = 0.0
-        emb_tensor = torch.round(emb_tensor * 1000) / 1000
-
-        torch.save(emb_tensor, os.path.join(OUTPUT_DIR, f"{seq_id}.pt"))
+        torch.save(emb, os.path.join(OUTPUT_DIR, f"{seq_id}.pt"))
 
         if idx % 50 == 0:
-            print(f"{idx} sequences processed...")
+            print(f"Processed {idx} sequences...")
 
     except Exception as e:
-        print(f"Failed {seq_id}: {e}")
+        print(f"Error processing {seq_id}: {e}")
 
-print(f"Done. Saved to: {OUTPUT_DIR}")
+print(f"Done. All valid sequence embeddings saved in: {OUTPUT_DIR}")
 
 
 
