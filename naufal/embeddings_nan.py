@@ -5,7 +5,7 @@ from esm.sdk.api import ESM3InferenceClient, ESMProtein, GenerationConfig
 
 # Paths
 FASTA_FILE = "/data/summer2020/naufal/protein_sequences.fasta"
-OUTPUT_DIR = "/data/summer2020/naufal/esm3_embeddings_new"
+OUTPUT_DIR = "/data/summer2020/naufal/esm3_embeddings"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Load ESM-3 model from Hugging Face (must have token set via huggingface-cli login or env var)
@@ -56,6 +56,9 @@ for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
         # Replace Inf/-Inf with 0
         coords[torch.isinf(coords)] = 0.0
 
+        # Replace NaNs with 0
+        coords = torch.nan_to_num(coords, nan=0.0)
+
         # Round to 3 decimal places
         coords = torch.round(coords * 1000) / 1000
 
@@ -69,4 +72,5 @@ for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
         print(f"Error processing {seq_id}: {e}")
 
 print(f"Done. Sequence embeddings saved in: {OUTPUT_DIR}")
+
 
