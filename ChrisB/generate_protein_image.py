@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import argparse
 from Bio import SeqIO
+# headers 
 
 def load_esm3_model():
     print("Loading ESM-3 model...")
