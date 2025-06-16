@@ -6,7 +6,7 @@ from esm.utils.constants.models import ESM3_OPEN_SMALL
 
 # Load the model client
 print("Loading ESM-3 model...")
-client = ESM3.from_pretrained(ESM3_OPEN_SMALL, device=torch.device("cuda"))
+model = ESM3.from_pretrained(ESM3_OPEN_SMALL, device=torch.device("cuda"))
 
 # Input and output paths
 FASTA_FILE = "/data/summer2020/naufal/protein_sequences.fasta"
@@ -38,19 +38,20 @@ for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
 
     try:
         protein = ESMProtein(sequence=seq)
-        protein_tensor = client.encode(protein)
+        protein_tensor = model.encode(protein)
 
         with torch.no_grad():
-            emb = client(
-                sequence_tokens=protein_tensor.sequence[None]
-            ).embeddings.detach().cpu().numpy()[0]
+            output1 = model(sequence_tokens=protein_tensor.sequence[None]).embeddings.detach().cpu().numpy()[0]
+            output2 = model.forward_and_sample(
+                protein_tensor, SamplingConfig(return_per_residue_embeddings=True)
+            ).per_residue_embedding.detach().cpu().numpy()
 
         # Clean NaNs and Infs
-        emb = torch.tensor(emb)
-        emb = torch.nan_to_num(emb, nan=0.0, posinf=0.0, neginf=0.0)
-        emb = torch.round(emb * 1000) / 1000  # Round to 3 decimal places
+        output1 = torch.tensor(output1)
+        output1 = torch.nan_to_num(output1, nan=0.0, posinf=0.0, neginf=0.0)
+        output1 = torch.round(output1 * 1000) / 1000
 
-        torch.save(emb, os.path.join(OUTPUT_DIR, f"{seq_id}.pt"))
+        torch.save(output1, os.path.join(OUTPUT_DIR, f"{seq_id}.pt"))
 
         if idx % 50 == 0:
             print(f"Processed {idx} sequences...")
@@ -59,6 +60,7 @@ for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
         print(f"Error processing {seq_id}: {e}")
 
 print(f"Done. All valid sequence embeddings saved in: {OUTPUT_DIR}")
+
 
 
 
