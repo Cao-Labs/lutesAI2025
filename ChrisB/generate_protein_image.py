@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import argparse
 from Bio import SeqIO
 # headers 
-
+#python generate_protein_image.py --sequence "MKTFFVLLLCTFTVSGTANAQDNPKTITISNDGTY" --out test_protein.png
 def load_esm3_model():
     print("Loading ESM-3 model...")
     model, alphabet = esm.pretrained.esm3_t36_3B_UR50D()
