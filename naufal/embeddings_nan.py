@@ -5,13 +5,13 @@ from esm.models.esm3 import ESM3
 from esm.sdk.api import ESM3InferenceClient, ESMProtein, GenerationConfig
 
 # Authenticate with Hugging Face
-login()  # Assumes token already configured
+login()  # Assumes token already configured via CLI or env var
 
-# Load ESM-3 model (on GPU first)
+# Load ESM-3 model (start on GPU)
 print("Loading ESM-3 model...")
 model: ESM3InferenceClient = ESM3.from_pretrained("esm3-open").to("cuda")
 
-# File paths
+# Paths
 FASTA_FILE = "/data/summer2020/naufal/protein_sequences.fasta"
 OUTPUT_DIR = "/data/summer2020/naufal/esm3_embeddings_new"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -39,7 +39,7 @@ def fasta_reader(path):
         if identifier:
             yield identifier, "".join(seq)
 
-# Sequence processing
+# Main processing loop
 print("Processing sequences...")
 for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
     if not seq or set(seq) == {"."}:
@@ -79,6 +79,10 @@ for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
             print(f"Failed to generate {seq_id}: {protein.error}")
             continue
 
+        if not hasattr(protein, "representations") or "sequence" not in protein.representations:
+            print(f"No sequence representation found for {seq_id}, skipping.")
+            continue
+
         embedding = torch.tensor(protein.representations["sequence"])  # shape [L, D]
         embedding[torch.isinf(embedding)] = 0.0
         embedding = torch.nan_to_num(embedding, nan=0.0)
@@ -94,5 +98,6 @@ for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
         print(f"Error processing {seq_id}: {e}")
 
 print(f"Done. Embeddings saved to: {OUTPUT_DIR}")
+
 
 
