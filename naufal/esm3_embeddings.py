@@ -40,12 +40,24 @@ for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
         # Wrap sequence as ESMProtein
         protein = ESMProtein(sequence=seq)
 
-        # Generate structure from sequence
-        protein = model.generate(protein, GenerationConfig(track="structure", num_steps=8))
+        # Generate sequence embeddings
+        results = model.generate(
+            [protein],
+            GenerationConfig(track="sequence", num_steps=8, temperature=0.7)
+        )
+        protein_out = results[0]
 
-        # Save coordinates as a tensor
-        coords = torch.tensor(protein.coordinates)  # shape: [L, 3, 3]
-        torch.save(coords, os.path.join(OUTPUT_DIR, f"{seq_id}.pt"))
+        # Extract sequence embedding
+        if not hasattr(protein_out, "representations") or "sequence" not in protein_out.representations:
+            print(f"No sequence representation found for {seq_id}, skipping.")
+            continue
+
+        embedding = torch.tensor(protein_out.representations["sequence"])  # shape: [L, D]
+        embedding[torch.isinf(embedding)] = 0.0
+        embedding = torch.nan_to_num(embedding, nan=0.0)
+        embedding = torch.round(embedding * 1000) / 1000
+
+        torch.save(embedding, os.path.join(OUTPUT_DIR, f"{seq_id}.pt"))
 
         if idx % 100 == 0:
             print(f"Processed {idx} sequences...")
@@ -54,5 +66,6 @@ for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
         print(f"Error processing {seq_id}: {e}")
 
 print(f"Done. Sequence embeddings saved in: {OUTPUT_DIR}")
+
 
 
