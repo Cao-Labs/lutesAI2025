@@ -5,7 +5,7 @@ from esm.sdk.api import ESM3InferenceClient, ESMProtein, GenerationConfig
 
 # Paths
 FASTA_FILE = "/data/summer2020/naufal/protein_sequences.fasta"
-OUTPUT_DIR = "/data/summer2020/naufal/esm3_sequence_embeddings"
+OUTPUT_DIR = "/data/summer2020/naufal/esm3_embeddings_new"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Load ESM-3 model (initially on GPU)
@@ -48,7 +48,7 @@ for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
         protein = ESMProtein(sequence=seq, name=seq_id)
 
         try:
-            # Run ESM-3 (no structure track)
+            # Run ESM-3 
             output = model([protein], GenerationConfig())
 
         except RuntimeError as e:
