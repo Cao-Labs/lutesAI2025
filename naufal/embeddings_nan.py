@@ -5,9 +5,9 @@ from esm.models.esm3 import ESM3
 from esm.sdk.api import ESM3InferenceClient, ESMProtein, GenerationConfig
 
 # Authenticate with Hugging Face
-login()  # Assumes token already configured via CLI or env var
+login()  # Ensure your HF token is set via CLI or env var
 
-# Load ESM-3 model (start on GPU)
+# Load ESM-3 model
 print("Loading ESM-3 model...")
 model: ESM3InferenceClient = ESM3.from_pretrained("esm3-open").to("cuda")
 
@@ -16,7 +16,7 @@ FASTA_FILE = "/data/summer2020/naufal/protein_sequences.fasta"
 OUTPUT_DIR = "/data/summer2020/naufal/esm3_embeddings_new"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Constants
+# Parameters
 MAX_LENGTH = 30000
 NUM_STEPS = 8
 TEMPERATURE = 0.7
@@ -39,17 +39,15 @@ def fasta_reader(path):
         if identifier:
             yield identifier, "".join(seq)
 
-# Main processing loop
+# Main loop
 print("Processing sequences...")
 for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
     if not seq or set(seq) == {"."}:
         print(f"Skipping {seq_id} (invalid or empty sequence)")
         continue
-
     if len(seq) >= MAX_LENGTH:
         print(f"Skipping {seq_id} (length {len(seq)} ≥ {MAX_LENGTH})")
         continue
-
     if any(residue not in VALID_AA for residue in seq):
         print(f"Skipping {seq_id} (contains invalid amino acids)")
         continue
@@ -58,35 +56,37 @@ for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
         protein = ESMProtein(sequence=seq)
 
         try:
-            protein = model.generate(
-                protein,
+            results = model.generate(
+                [protein],
                 GenerationConfig(track="sequence", num_steps=NUM_STEPS, temperature=TEMPERATURE)
             )
+            protein_out = results[0]
 
         except RuntimeError as e:
             if "CUDA out of memory" in str(e):
                 print(f"CUDA out of memory on {seq_id}, switching to CPU")
                 torch.cuda.empty_cache()
                 model = model.to("cpu")
-                protein = model.generate(
-                    protein,
+                results = model.generate(
+                    [protein],
                     GenerationConfig(track="sequence", num_steps=NUM_STEPS, temperature=TEMPERATURE)
                 )
+                protein_out = results[0]
             else:
                 raise
 
-        if hasattr(protein, "error"):
-            print(f"Failed to generate {seq_id}: {protein.error}")
+        if hasattr(protein_out, "error"):
+            print(f"Failed to generate {seq_id}: {protein_out.error}")
             continue
 
-        if not hasattr(protein, "representations") or "sequence" not in protein.representations:
+        if not hasattr(protein_out, "representations") or "sequence" not in protein_out.representations:
             print(f"No sequence representation found for {seq_id}, skipping.")
             continue
 
-        embedding = torch.tensor(protein.representations["sequence"])  # shape [L, D]
+        embedding = torch.tensor(protein_out.representations["sequence"])  # shape [L, D]
         embedding[torch.isinf(embedding)] = 0.0
         embedding = torch.nan_to_num(embedding, nan=0.0)
-        embedding = torch.round(embedding * 1000) / 1000
+        embedding = torch.round(embedding * 1000) / 1000  # round to 3 decimals
 
         out_path = os.path.join(OUTPUT_DIR, f"{seq_id}.pt")
         torch.save(embedding, out_path)
