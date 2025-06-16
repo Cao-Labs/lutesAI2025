@@ -1,43 +1,72 @@
 import os
 import torch
-import numpy as np
+from esm.models.esm3 import ESM3
+from esm.sdk.api import ESM3InferenceClient, ESMProtein, GenerationConfig
 
-# CONFIG
-INPUT_DIR = "/data/summer2020/naufal/esm3_embeddings"
-MAX_FILES = 10          # How many .pt files to show
-SAVE_TO_TEXT = False    # Save output as .txt? (True/False)
+# Paths
+FASTA_FILE = "/data/summer2020/naufal/protein_sequences.fasta"
+OUTPUT_DIR = "/data/summer2020/naufal/esm3_embeddings_new"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-def pretty_print(tensor: torch.Tensor, filename: str):
-    array = tensor.numpy()
-    print(f"\n=== {filename} ===")
-    print(f"Shape: {array.shape}")
-    
-    if np.isnan(array).any():
-        print("⚠️  WARNING: NaN values found in this file.")
-    else:
-        print("No NaNs detected.")
+# Load ESM-3 model from Hugging Face (must have token set via huggingface-cli login or env var)
+print("Loading ESM-3 model...")
+model: ESM3InferenceClient = ESM3.from_pretrained("esm3-open").to("cuda")  # use "cpu" if no GPU
 
-    # Print the first few rows of the array
-    print("Preview:")
-    preview_rows = min(10, array.shape[0])
-    print(np.array2string(array[:preview_rows], precision=3, suppress_small=True))
+# Generator to read sequences one at a time
+def fasta_reader(fasta_path):
+    with open(fasta_path, "r") as file:
+        identifier = None
+        sequence = []
+        for line in file:
+            line = line.strip()
+            if line.startswith(">"):
+                if identifier:
+                    yield identifier, "".join(sequence)
+                identifier = line[1:]
+                sequence = []
+            else:
+                sequence.append(line)
+        if identifier:
+            yield identifier, "".join(sequence)
 
-    if SAVE_TO_TEXT:
-        out_path = os.path.join(INPUT_DIR, filename + ".txt")
-        with open(out_path, "w") as f:
-            f.write(f"# {filename}\n")
-            f.write(f"# Shape: {array.shape}\n")
-            f.write("# NaNs present: " + str(np.isnan(array).any()) + "\n\n")
-            np.savetxt(f, array, fmt="%.4f")
-        print(f"(Saved to {out_path})")
+# Max allowed sequence length
+MAX_LENGTH = 30000
 
-# Main loop
-print("Scanning directory for .pt files...")
-pt_files = [f for f in os.listdir(INPUT_DIR) if f.endswith(".pt")]
-if not pt_files:
-    print("No .pt files found in the directory.")
-else:
-    for idx, fname in enumerate(pt_files[:MAX_FILES]):
-        path = os.path.join(INPUT_DIR, fname)
-        tensor = torch.load(path)
-        pretty_print(tensor, fname)
+# Process each protein sequence
+print("Processing sequences...")
+for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
+    if not seq or set(seq) == {"."}:
+        print(f"Skipping {seq_id} (invalid sequence)")
+        continue
+
+    if len(seq) >= MAX_LENGTH:
+        print(f"Skipping {seq_id} (length {len(seq)} ≥ {MAX_LENGTH})")
+        continue
+
+    try:
+        # Wrap sequence as ESMProtein
+        protein = ESMProtein(sequence=seq)
+
+        # Generate structure from sequence
+        protein = model.generate(protein, GenerationConfig(track="structure", num_steps=8))
+
+        # Convert to tensor
+        coords = torch.tensor(protein.coordinates)
+
+        # Replace Inf/-Inf with 0
+        coords[torch.isinf(coords)] = 0.0
+
+        # Round to 3 decimal places
+        coords = torch.round(coords * 1000) / 1000
+
+        # Save tensor
+        torch.save(coords, os.path.join(OUTPUT_DIR, f"{seq_id}.pt"))
+
+        if idx % 100 == 0:
+            print(f"Processed {idx} sequences...")
+
+    except Exception as e:
+        print(f"Error processing {seq_id}: {e}")
+
+print(f"Done. Sequence embeddings saved in: {OUTPUT_DIR}")
+
