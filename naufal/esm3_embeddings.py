@@ -1,14 +1,15 @@
 import os
 import torch
 from huggingface_hub import login
-from esm.sdk.api import ESM3InferenceClient, ESMProtein, GenerationConfig
+from esm.models.esm3 import ESM3
+from esm.sdk.api import ESMProtein, GenerationConfig
 
 # Authenticate with Hugging Face
-login()  # Requires "Read" permission token set via CLI or env
+login()  # You can run huggingface-cli login once to skip this in the future
 
-# Load the ESM-3 model
+# Load ESM-3 model using GitHub-style call
 print("Loading ESM-3 model...")
-model = ESM3InferenceClient.from_pretrained("esm3-open").to("cuda")
+model = ESM3.from_pretrained("esm3-open").to("cuda")  # or "cpu" if no GPU
 
 # Paths
 FASTA_FILE = "/data/summer2020/naufal/protein_sequences.fasta"
@@ -31,36 +32,34 @@ def fasta_reader(path):
         if identifier:
             yield identifier, "".join(seq)
 
-# Generation loop
+# Process sequences one-by-one
+print("Processing sequences...")
 for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
     if not seq or set(seq) == {"."}:
         print(f"Skipping {seq_id} (invalid sequence)")
         continue
 
     try:
-        # Create ESMProtein object
         protein = ESMProtein(sequence=seq)
 
-        # Generate sequence representation only
+        # Generate only sequence embeddings
         protein = model.generate(protein, GenerationConfig(track="sequence", num_steps=8, temperature=0.7))
 
-        # Check if generation succeeded and contains embeddings
         if hasattr(protein, "error"):
             print(f"Error in generation for {seq_id}: {protein.error}")
             continue
+
         if not hasattr(protein, "representations") or "sequence" not in protein.representations:
             print(f"No sequence embedding found for {seq_id}, skipping.")
             continue
 
-        # Extract and clean the embedding
+        # Clean and save embedding
         embedding = torch.tensor(protein.representations["sequence"])
         embedding[torch.isinf(embedding)] = 0.0
         embedding = torch.nan_to_num(embedding, nan=0.0)
         embedding = torch.round(embedding * 1000) / 1000
 
-        # Save to file
-        out_path = os.path.join(OUTPUT_DIR, f"{seq_id}.pt")
-        torch.save(embedding, out_path)
+        torch.save(embedding, os.path.join(OUTPUT_DIR, f"{seq_id}.pt"))
 
         if idx % 100 == 0:
             print(f"Processed {idx} sequences...")
