@@ -6,7 +6,7 @@ from esm.utils.constants.models import ESM3_OPEN_SMALL
 
 # Load the model client
 print("Loading ESM-3 model...")
-client = ESM3.from_pretrained(ESM3_OPEN_SMALL, device="cuda")
+client = ESM3.from_pretrained(ESM3_OPEN_SMALL, device=torch.device("cuda"))
 
 # Input and output paths
 FASTA_FILE = "/data/summer2020/naufal/protein_sequences.fasta"
@@ -40,15 +40,13 @@ for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
         protein = ESMProtein(sequence=seq)
         protein_tensor = client.encode(protein)
 
-        output = client.forward_and_sample(
-            protein_tensor,
-            SamplingConfig(return_per_residue_embeddings=True)
-        )
-
-        emb = output.per_residue_embedding
-        emb = torch.tensor(emb)
+        with torch.no_grad():
+            emb = client(
+                sequence_tokens=protein_tensor.sequence[None]
+            ).embeddings.detach().cpu().numpy()[0]
 
         # Clean NaNs and Infs
+        emb = torch.tensor(emb)
         emb = torch.nan_to_num(emb, nan=0.0, posinf=0.0, neginf=0.0)
         emb = torch.round(emb * 1000) / 1000  # Round to 3 decimal places
 
