@@ -5,18 +5,24 @@ from esm.models.esm3 import ESM3
 from esm.sdk.api import ESM3InferenceClient, ESMProtein, GenerationConfig
 
 # Authenticate with Hugging Face
-login()  # Assumes you have a token set via CLI or env variable
+login()  # Assumes token already configured
 
-# Load the model (GPU if available)
-print("Loading ESM-3 model with sequence track...")
+# Load ESM-3 model (on GPU first)
+print("Loading ESM-3 model...")
 model: ESM3InferenceClient = ESM3.from_pretrained("esm3-open").to("cuda")
 
-# Paths
+# File paths
 FASTA_FILE = "/data/summer2020/naufal/protein_sequences.fasta"
 OUTPUT_DIR = "/data/summer2020/naufal/esm3_sequence_embeddings"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Fasta reader
+# Constants
+MAX_LENGTH = 30000
+NUM_STEPS = 8
+TEMPERATURE = 0.7
+VALID_AA = set("ACDEFGHIKLMNPQRSTVWY")
+
+# FASTA reader
 def fasta_reader(path):
     with open(path, "r") as f:
         identifier = None
@@ -33,38 +39,33 @@ def fasta_reader(path):
         if identifier:
             yield identifier, "".join(seq)
 
-# Parameters
-MAX_LENGTH = 30000
-NUM_STEPS = 8
-TEMPERATURE = 0.7
-
-# Process
+# Sequence processing
 print("Processing sequences...")
 for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
     if not seq or set(seq) == {"."}:
-        print(f"Skipping {seq_id} (invalid sequence)")
+        print(f"Skipping {seq_id} (invalid or empty sequence)")
         continue
+
     if len(seq) >= MAX_LENGTH:
         print(f"Skipping {seq_id} (length {len(seq)} ≥ {MAX_LENGTH})")
+        continue
+
+    if any(residue not in VALID_AA for residue in seq):
+        print(f"Skipping {seq_id} (contains invalid amino acids)")
         continue
 
     try:
         protein = ESMProtein(sequence=seq)
 
         try:
-            # Use track="sequence" to generate sequence embeddings
             protein = model.generate(
                 protein,
-                GenerationConfig(
-                    track="sequence",
-                    num_steps=NUM_STEPS,
-                    temperature=TEMPERATURE
-                )
+                GenerationConfig(track="sequence", num_steps=NUM_STEPS, temperature=TEMPERATURE)
             )
 
         except RuntimeError as e:
             if "CUDA out of memory" in str(e):
-                print(f"CUDA OOM for {seq_id}. Retrying on CPU...")
+                print(f"CUDA out of memory on {seq_id}, switching to CPU")
                 torch.cuda.empty_cache()
                 model = model.to("cpu")
                 protein = model.generate(
@@ -74,23 +75,24 @@ for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
             else:
                 raise
 
-        # Extract final hidden states from sequence generation
-        embedding = torch.tensor(protein.representations["sequence"])  # shape: [L, D]
+        if hasattr(protein, "error"):
+            print(f"Failed to generate {seq_id}: {protein.error}")
+            continue
 
-        # Clean: replace inf/nan, round
+        embedding = torch.tensor(protein.representations["sequence"])  # shape [L, D]
         embedding[torch.isinf(embedding)] = 0.0
         embedding = torch.nan_to_num(embedding, nan=0.0)
-        embedding = torch.round(embedding * 1000) / 1000  # 3 decimal places
+        embedding = torch.round(embedding * 1000) / 1000
 
-        # Save
         out_path = os.path.join(OUTPUT_DIR, f"{seq_id}.pt")
         torch.save(embedding, out_path)
 
         if idx % 100 == 0:
-            print(f"Processed {idx} sequences...")
+            print(f"Processed {idx} sequences")
 
     except Exception as e:
         print(f"Error processing {seq_id}: {e}")
 
 print(f"Done. Embeddings saved to: {OUTPUT_DIR}")
+
 
