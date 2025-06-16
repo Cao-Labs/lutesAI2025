@@ -5,14 +5,14 @@ from esm.sdk.api import ESM3InferenceClient, ESMProtein, GenerationConfig
 
 # Paths
 FASTA_FILE = "/data/summer2020/naufal/protein_sequences.fasta"
-OUTPUT_DIR = "/data/summer2020/naufal/esm3_embeddings_new"
+OUTPUT_DIR = "/data/summer2020/naufal/esm3_sequence_embeddings"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Load ESM-3 model from Hugging Face (must have token set via huggingface-cli login or env var)
-print("Loading ESM-3 model...")
-model: ESM3InferenceClient = ESM3.from_pretrained("esm3-open").to("cuda")  # use "cpu" if no GPU
+# Load ESM-3 model (initially on GPU)
+print("Loading ESM-3 model on GPU...")
+model: ESM3InferenceClient = ESM3.from_pretrained("esm3-open").to("cuda")
 
-# Generator to read sequences one at a time
+# FASTA reader
 def fasta_reader(fasta_path):
     with open(fasta_path, "r") as file:
         identifier = None
@@ -29,10 +29,10 @@ def fasta_reader(fasta_path):
         if identifier:
             yield identifier, "".join(sequence)
 
-# Max allowed sequence length
+# Settings
 MAX_LENGTH = 30000
 
-# Process each protein sequence
+# Process sequences
 print("Processing sequences...")
 for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
     if not seq or set(seq) == {"."}:
@@ -44,26 +44,35 @@ for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
         continue
 
     try:
-        # Wrap sequence as ESMProtein
-        protein = ESMProtein(sequence=seq)
+        # Wrap sequence
+        protein = ESMProtein(sequence=seq, name=seq_id)
 
-        # Generate structure from sequence
-        protein = model.generate(protein, GenerationConfig(track="structure", num_steps=8))
+        try:
+            # Run ESM-3 (no structure track)
+            output = model([protein], GenerationConfig())
 
-        # Convert to tensor
-        coords = torch.tensor(protein.coordinates)
+        except RuntimeError as e:
+            if "CUDA out of memory" in str(e):
+                print(f"CUDA OOM for {seq_id}, retrying on CPU...")
+                torch.cuda.empty_cache()
+                model = model.to("cpu")
+                output = model([protein], GenerationConfig())
+            else:
+                raise
 
-        # Replace Inf/-Inf with 0
-        coords[torch.isinf(coords)] = 0.0
+        # Extract residue embeddings
+        embedding = output[0].representations["residue"]  # shape: [L, D]
 
-        # Replace NaNs with 0
-        coords = torch.nan_to_num(coords, nan=0.0)
+        # Replace NaN and Inf with 0
+        embedding[torch.isinf(embedding)] = 0.0
+        embedding = torch.nan_to_num(embedding, nan=0.0)
 
         # Round to 3 decimal places
-        coords = torch.round(coords * 1000) / 1000
+        embedding = torch.round(embedding * 1000) / 1000
 
-        # Save tensor
-        torch.save(coords, os.path.join(OUTPUT_DIR, f"{seq_id}.pt"))
+        # Save
+        out_path = os.path.join(OUTPUT_DIR, f"{seq_id}.pt")
+        torch.save(embedding, out_path)
 
         if idx % 100 == 0:
             print(f"Processed {idx} sequences...")
