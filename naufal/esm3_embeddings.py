@@ -7,6 +7,7 @@ from esm.utils.constants.models import ESM3_OPEN_SMALL
 # Load the model client
 print("Loading ESM-3 model...")
 model = ESM3.from_pretrained(ESM3_OPEN_SMALL, device=torch.device("cuda"))
+model.eval().to(torch.float32)  # Ensure model runs in float32 to avoid dtype mismatch
 
 # Input and output paths
 FASTA_FILE = "/data/summer2020/naufal/protein_sequences.fasta"
@@ -60,6 +61,7 @@ for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
         print(f"Error processing {seq_id}: {e}")
 
 print(f"Done. All valid sequence embeddings saved in: {OUTPUT_DIR}")
+
 
 
 
