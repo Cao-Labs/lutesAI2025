@@ -7,7 +7,7 @@ from esm.utils.constants.models import ESM3_OPEN_SMALL
 # Config
 BATCH_SIZE = 8
 FASTA_FILE = "/data/summer2020/naufal/protein_sequences.fasta"
-OUTPUT_DIR = "/data/summer2020/naufal/esm3_embeddings_new"
+OUTPUT_DIR = "/data/summer2020/naufal/esm3_embeddings"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Load model
