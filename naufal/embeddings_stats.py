@@ -44,11 +44,16 @@ for filename in os.listdir(EMBEDDINGS_DIR):
         min_val = min(min_val, np.min(np_tensor))
         max_val = max(max_val, np.max(np_tensor))
 
+        if total_files == 1:
+            print("First valid file processed.")
+        elif total_files % 50000 == 0:
+            print(f"Processed {total_files} files...")
+
     except Exception as e:
         print(f"Failed to process {filename}: {e}")
 
 # Summary report
-print(f"Total files checked: {total_files}")
+print(f"\nTotal files checked: {total_files}")
 print(f"Files with shape != [L, {expected_D}]: {mismatched_shape_count}")
 print(f"Files containing NaN or Inf: {nan_or_inf_count}")
 
