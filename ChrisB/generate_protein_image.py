@@ -6,7 +6,7 @@ import argparse
 from esm.pretrained import load_model_and_alphabet_local
 
 def load_esm3_model():
-    model_path = "KDSA_ACIAD.pt"  # Your local ESM-3 model file
+    model_path = "/data/summer2020/naufal/esm3_embeddings/KDSA_ACIAD.pt"  # Your local ESM-3 model file
     print(f"Loading ESM-3 model from {model_path}...")
     model, alphabet = load_model_and_alphabet_local(model_path)
     batch_converter = alphabet.get_batch_converter()
