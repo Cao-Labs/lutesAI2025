@@ -46,7 +46,7 @@ for filename in os.listdir(EMBEDDINGS_DIR):
 
         if total_files == 1:
             print("First valid file processed.")
-        elif total_files % 50000 == 0:
+        elif total_files % 10000 == 0:
             print(f"Processed {total_files} files...")
 
     except Exception as e:
@@ -66,5 +66,6 @@ if mismatched_shape_count + nan_or_inf_count < total_files:
     print(f"  Max L: {max_L}")
 else:
     print("\nNo valid embeddings found to compute value or length range.")
+
 
 
