@@ -11,7 +11,7 @@ model.eval().to(torch.float32)
 
 # Paths
 FASTA_FILE = "/data/summer2020/naufal/protein_sequences.fasta"
-OUTPUT_DIR = "/data/summer2020/naufal/esm3_embeddings_new"
+OUTPUT_DIR = "/data/summer2020/naufal/esm3_embeddings"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Read sequences one at a time
