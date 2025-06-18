@@ -1,58 +1,76 @@
 import os
+from collections import defaultdict
 
-# Inputs
-ID_MAPPING_FILE = "/data/shared/databases/UniProt2025/idmapping_uni.txt"
-PDB_DIR = "/data/shared/databases/alphaFold/"
-query_internal_id = "CYB_CROAT"  # <<< Change this to your desired protein ID
+# Paths
+PDB_DIR = "/data/shared/databases/alphaFold"
+IDMAP_FILE = "/data/shared/databases/UniProt2025/idmapping_uni.txt"
+OUTPUT_FASTA = "/data/summer2020/naufal/training_data/protein_sequences.fasta"
+OUTPUT_DIR = os.path.dirname(OUTPUT_FASTA)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Step 1: Find corresponding accession from mapping file
-accession = None
-with open(ID_MAPPING_FILE, "r") as f:
-    for line in f:
-        acc, internal = line.strip().split("\t")
-        if internal == query_internal_id:
-            accession = acc
-            break
-
-if accession is None:
-    print(f"Error: Could not find accession for ID {query_internal_id}")
-    exit(1)
-
-# Step 2: Locate PDB file
-pdb_filename = f"AF-{accession}-F1-model_v4.pdb"
-pdb_path = os.path.join(PDB_DIR, pdb_filename)
-if not os.path.exists(pdb_path):
-    print(f"Error: PDB file {pdb_filename} not found.")
-    exit(1)
-
-# Step 3: Extract sequence from ATOM records
-three_to_one = {
-    'ALA': 'A', 'ARG': 'R', 'ASN': 'N', 'ASP': 'D',
-    'CYS': 'C', 'GLN': 'Q', 'GLU': 'E', 'GLY': 'G',
-    'HIS': 'H', 'ILE': 'I', 'LEU': 'L', 'LYS': 'K',
-    'MET': 'M', 'PHE': 'F', 'PRO': 'P', 'SER': 'S',
-    'THR': 'T', 'TRP': 'W', 'TYR': 'Y', 'VAL': 'V',
-    'SEC': 'U', 'PYL': 'O', 'ASX': 'B', 'GLX': 'Z',
-    'XAA': 'X', 'UNK': 'X'
+# Standard amino acid mapping (from 3-letter to 1-letter codes)
+aa3_to_aa1 = {
+    "ALA": "A", "ARG": "R", "ASN": "N", "ASP": "D", "CYS": "C",
+    "GLN": "Q", "GLU": "E", "GLY": "G", "HIS": "H", "ILE": "I",
+    "LEU": "L", "LYS": "K", "MET": "M", "PHE": "F", "PRO": "P",
+    "SER": "S", "THR": "T", "TRP": "W", "TYR": "Y", "VAL": "V",
 }
 
-sequence = []
-seen_residues = set()
-
-with open(pdb_path, "r") as f:
+# Map internal ID to UniProt accession
+print("Indexing ID mapping file...")
+internal_to_accession = {}
+with open(IDMAP_FILE, "r") as f:
     for line in f:
-        if line.startswith("ATOM"):
-            resname = line[17:20].strip()
-            resnum = line[22:26].strip()
-            chain = line[21].strip()
-            resid = (chain, resnum)
+        parts = line.strip().split("\t")
+        if len(parts) == 2:
+            accession, internal_id = parts
+            internal_to_accession[internal_id] = accession
+print(f"Mapped {len(internal_to_accession)} IDs.\n")
 
-            if resid not in seen_residues:
-                seen_residues.add(resid)
-                one_letter = three_to_one.get(resname, 'X')
-                sequence.append(one_letter)
+# Helper: extract sequence from ATOM lines
+def extract_sequence_from_pdb(pdb_path):
+    sequence = []
+    seen_residues = set()
+    with open(pdb_path, "r") as f:
+        for line in f:
+            if line.startswith("ATOM") and line[12:16].strip() == "CA":
+                res_num = line[22:26].strip()
+                res_name = line[17:20].strip()
+                if res_num not in seen_residues:
+                    seen_residues.add(res_num)
+                    aa = aa3_to_aa1.get(res_name, "X")  # unknown = X
+                    sequence.append(aa)
+    return "".join(sequence)
 
-seq_str = ''.join(sequence)
-print(f"Sequence for {query_internal_id} (from {pdb_filename}):")
-print(seq_str)
-print(f"\nLength: {len(seq_str)} residues")
+# Stream PDB directory
+print("Processing PDB files...")
+written = 0
+with open(OUTPUT_FASTA, "w") as out_fasta:
+    for fname in os.listdir(PDB_DIR):
+        if not fname.endswith(".pdb"):
+            continue
+
+        # Extract internal ID
+        try:
+            parts = fname.split("-")
+            acc_part = parts[1]  # UniProt accession
+            internal_id = None
+            for k, v in internal_to_accession.items():
+                if v == acc_part:
+                    internal_id = k
+                    break
+            if internal_id is None:
+                continue
+        except:
+            continue
+
+        full_path = os.path.join(PDB_DIR, fname)
+        sequence = extract_sequence_from_pdb(full_path)
+
+        if sequence:
+            out_fasta.write(f">{internal_id}\n{sequence}\n")
+            written += 1
+            if written == 1 or written % 10000 == 0:
+                print(f"Written {written} sequences...")
+
+print(f"\nDone. Total sequences written: {written}")
