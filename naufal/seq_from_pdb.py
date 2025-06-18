@@ -3,7 +3,7 @@ import os
 # Inputs
 ID_MAPPING_FILE = "/data/shared/databases/UniProt2025/idmapping_uni.txt"
 PDB_DIR = "/data/shared/databases/alphaFold/"
-query_internal_id = "037L_IIV3"  # <<< Change this to your desired protein ID
+query_internal_id = "001R_FRG3G"  # <<< Change this to your desired protein ID
 
 # Step 1: Find corresponding accession from mapping file
 accession = None
