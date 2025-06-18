@@ -9,7 +9,7 @@ FEATURES_FILE = "/data/summer2020/naufal/protein_features.txt"
 OUTPUT_DIR = "/data/summer2020/naufal/final_embeddings"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-L_FIXED = 1890  # Changed from 4096 to 1890
+L_FIXED = 1890  
 D_ORIG = 1536
 D_FINAL = D_ORIG + 4 + 1
 BATCH_SIZE = 1000
