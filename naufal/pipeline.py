@@ -66,6 +66,7 @@ def process_protein(fname):
         if ss_tensor is None or rsa_tensor is None:
             return (prot_id, "missing_features")
         if ss_tensor.shape[0] != L or rsa_tensor.shape[0] != L:
+            print(f"[LENGTH MISMATCH] {prot_id}: ESM={L}, SS={ss_tensor.shape[0]}, RSA={rsa_tensor.shape[0]}")
             return (prot_id, "length_mismatch")
 
         # Move to GPU
