@@ -9,7 +9,7 @@ FEATURES_FILE = "/data/summer2020/naufal/protein_features.txt"
 OUTPUT_DIR = "/data/summer2020/naufal/final_embeddings"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-L_FIXED = 4096
+L_FIXED = 1890  # Changed from 4096 to 1890
 D_ORIG = 1536
 D_FINAL = D_ORIG + 4 + 1
 BATCH_SIZE = 1000
@@ -77,11 +77,10 @@ def process_protein(fname):
         full_tensor = torch.cat([embedding, ss_tensor, rsa_tensor], dim=1)
 
         # Fix length
-        L_current = full_tensor.shape[0]
-        if L_current < L_FIXED:
-            pad = torch.zeros((L_FIXED - L_current, D_FINAL), dtype=full_tensor.dtype, device=DEVICE)
+        if L < L_FIXED:
+            pad = torch.zeros((L_FIXED - L, D_FINAL), dtype=full_tensor.dtype, device=DEVICE)
             full_tensor = torch.cat([full_tensor, pad], dim=0)
-        elif L_current > L_FIXED:
+        elif L > L_FIXED:
             full_tensor = full_tensor[:L_FIXED, :]
 
         # Normalize (min-max)
@@ -104,7 +103,7 @@ all_files = [f for f in os.listdir(EMBEDDINGS_DIR) if f.endswith(".pt")]
 total_files = len(all_files)
 success, skipped = 0, 0
 
-print(f"Starting batch processing with {NUM_WORKERS} workers...\n")
+print(f"Starting batch processing with {NUM_WORKERS} workers and L_FIXED = {L_FIXED}...\n")
 
 with torch.no_grad():
     for i in range(0, total_files, BATCH_SIZE):
@@ -126,6 +125,7 @@ with torch.no_grad():
 print("\nFinished processing.")
 print(f"Total successfully processed: {success}")
 print(f"Total skipped: {skipped}")
+
 
 
 
