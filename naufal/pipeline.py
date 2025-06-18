@@ -2,23 +2,24 @@ import os
 import torch
 import numpy as np
 
-# Paths
+# Constants
 EMBEDDINGS_DIR = "/data/summer2020/naufal/esm3_embeddings"
 FEATURES_FILE = "/data/summer2020/naufal/protein_features.txt"
 OUTPUT_DIR = "/data/summer2020/naufal/final_embeddings"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Constants
 L_FIXED = 4096
 D_ORIG = 1536
 D_FINAL = D_ORIG + 4 + 1
+BATCH_SIZE = 1000
+
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # One-hot encoding for SS
 ss_vocab = ['H', 'E', 'C', 'L']
 ss_to_onehot = {ch: torch.eye(len(ss_vocab))[i] for i, ch in enumerate(ss_vocab)}
 
-# Load SS and RSA features
+# Load SS + RSA features into a dict
 print("Loading SS and RSA features...")
 features = {}
 with open(FEATURES_FILE, "r") as f:
@@ -50,79 +51,82 @@ with open(FEATURES_FILE, "r") as f:
 
 print(f"Loaded SS/RSA features for {len(features)} proteins.\n")
 
-# Fix sequence length to L = 4096
-def fix_length(tensor, L_fixed=4096):
+# Fix L
+def fix_length(tensor, L_fixed=L_FIXED):
     L, D = tensor.shape
     if L == L_fixed:
         return tensor
-    elif L > L_fixed:
+    elif L > L_FIXED:
         return tensor[:L_fixed, :]
     else:
         pad = torch.zeros((L_fixed - L, D), dtype=tensor.dtype, device=tensor.device)
         return torch.cat([tensor, pad], dim=0)
 
-# Min-Max normalization (per tensor)
+# Min-max normalization
 def normalize_minmax(tensor):
     min_vals = tensor.min(dim=0, keepdim=True).values
     max_vals = tensor.max(dim=0, keepdim=True).values
     diff = max_vals - min_vals
-    diff[diff == 0] = 1.0  # prevent divide-by-zero
+    diff[diff == 0] = 1.0
     return (tensor - min_vals) / diff
 
-# Main loop
+# All valid file names
+all_files = [f for f in os.listdir(EMBEDDINGS_DIR) if f.endswith(".pt")]
+total_files = len(all_files)
+
 success, skipped = 0, 0
-print("Processing and writing training-ready embeddings...\n")
+print("Processing in batches...\n")
 
-for fname in os.listdir(EMBEDDINGS_DIR):
-    if not fname.endswith(".pt"):
-        continue
+with torch.no_grad():
+    for i in range(0, total_files, BATCH_SIZE):
+        batch = all_files[i:i + BATCH_SIZE]
+        for fname in batch:
+            prot_id = fname[:-3]
+            fpath = os.path.join(EMBEDDINGS_DIR, fname)
 
-    prot_id = fname[:-3]
-    fpath = os.path.join(EMBEDDINGS_DIR, fname)
+            try:
+                # Load embedding
+                embedding = torch.load(fpath, map_location="cpu")
+                L = embedding.shape[0]
 
-    try:
-        # Load embedding
-        embedding = torch.load(fpath, map_location="cpu")  # [L, 1536]
-        L = embedding.shape[0]
+                if prot_id not in features:
+                    skipped += 1
+                    continue
 
-        # Get matching SS/RSA
-        if prot_id not in features:
-            skipped += 1
-            continue
+                ss_tensor, rsa_tensor = features[prot_id]
+                if ss_tensor.shape[0] != L or rsa_tensor.shape[0] != L:
+                    skipped += 1
+                    continue
 
-        ss_tensor, rsa_tensor = features[prot_id]
-        if ss_tensor.shape[0] != L or rsa_tensor.shape[0] != L:
-            skipped += 1
-            continue
+                # Move to GPU
+                embedding = embedding.to(DEVICE)
+                ss_tensor = ss_tensor.to(DEVICE)
+                rsa_tensor = rsa_tensor.to(DEVICE)
 
-        # Move to GPU
-        embedding = embedding.to(DEVICE)
-        ss_tensor = ss_tensor.to(DEVICE)
-        rsa_tensor = rsa_tensor.to(DEVICE)
+                # Append features
+                full_tensor = torch.cat([embedding, ss_tensor, rsa_tensor], dim=1)
 
-        # Combine all features: [L, 1541]
-        full_tensor = torch.cat([embedding, ss_tensor, rsa_tensor], dim=1)
+                # Fix length
+                full_tensor = fix_length(full_tensor, L_fixed=L_FIXED)
 
-        # Fix sequence length to 4096
-        full_tensor = fix_length(full_tensor, L_fixed=L_FIXED)
+                # Normalize
+                full_tensor = normalize_minmax(full_tensor)
 
-        # Normalize with Min-Max
-        full_tensor = normalize_minmax(full_tensor)
+                # Save
+                out_path = os.path.join(OUTPUT_DIR, f"{prot_id}.pt")
+                torch.save(full_tensor, out_path)
 
-        # Save
-        out_path = os.path.join(OUTPUT_DIR, f"{prot_id}.pt")
-        torch.save(full_tensor, out_path)
+                success += 1
+                if success == 1 or success % 50000 == 0:
+                    print(f"Processed {success} proteins...")
 
-        success += 1
-        if success == 1 or success % 50000 == 0:
-            print(f"Processed {success} proteins...")
+            except Exception as e:
+                print(f"Error with {prot_id}: {e}")
+                skipped += 1
 
-    except Exception as e:
-        print(f"Error with {prot_id}: {e}")
-        skipped += 1
-
-# Summary
+# Final report
 print("\nAll done.")
-print(f"Total successfully processed: {success}")
+print(f"Total processed: {success}")
 print(f"Total skipped: {skipped}")
+
 
