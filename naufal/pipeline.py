@@ -13,7 +13,7 @@ L_FIXED = 4096
 D_ORIG = 1536
 D_FINAL = D_ORIG + 4 + 1
 BATCH_SIZE = 1000
-NUM_WORKERS = 4  # Tune based on your CPU
+NUM_WORKERS = 4
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -21,37 +21,35 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 ss_vocab = ['H', 'E', 'C', 'L']
 ss_to_onehot = {ch: torch.eye(len(ss_vocab))[i] for i, ch in enumerate(ss_vocab)}
 
-# Load SS/RSA features into shared dictionary
-print("Loading SS and RSA features...")
-features = {}
-with open(FEATURES_FILE, "r") as f:
-    current_id = None
+# Function to fetch features for a single protein
+def load_features_for_id(protein_id):
     ss_rows, rsa_rows = [], []
+    found = False
 
-    for line in f:
-        line = line.strip()
-        if line.startswith("#"):
-            if current_id and ss_rows and rsa_rows:
-                ss_tensor = torch.stack(ss_rows)
-                rsa_tensor = torch.tensor(rsa_rows).unsqueeze(1)
-                features[current_id] = (ss_tensor, rsa_tensor)
-            current_id = line[1:].strip()
-            ss_rows, rsa_rows = [], []
-        else:
-            try:
-                ss_char, rsa_val = line.split("\t")
-                onehot = ss_to_onehot.get(ss_char, ss_to_onehot['L'])
-                ss_rows.append(onehot)
-                rsa_rows.append(float(rsa_val))
-            except:
+    with open(FEATURES_FILE, "r") as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith("#"):
+                if found:
+                    break
+                found = (line[1:].strip() == protein_id)
                 continue
 
-    if current_id and ss_rows and rsa_rows:
+            if found:
+                try:
+                    ss_char, rsa_val = line.split("\t")
+                    onehot = ss_to_onehot.get(ss_char, ss_to_onehot['L'])
+                    ss_rows.append(onehot)
+                    rsa_rows.append(float(rsa_val))
+                except:
+                    continue
+
+    if found and ss_rows and rsa_rows:
         ss_tensor = torch.stack(ss_rows)
         rsa_tensor = torch.tensor(rsa_rows).unsqueeze(1)
-        features[current_id] = (ss_tensor, rsa_tensor)
-
-print(f"Loaded SS/RSA features for {len(features)} proteins.\n")
+        return ss_tensor, rsa_tensor
+    else:
+        return None, None
 
 # Define the processing function
 def process_protein(fname):
@@ -59,14 +57,14 @@ def process_protein(fname):
         prot_id = fname[:-3]
         fpath = os.path.join(EMBEDDINGS_DIR, fname)
 
-        if prot_id not in features:
-            return (prot_id, "missing_features")
-
         # Load embedding
         embedding = torch.load(fpath, map_location="cpu")
         L = embedding.shape[0]
 
-        ss_tensor, rsa_tensor = features[prot_id]
+        # Load features (on demand)
+        ss_tensor, rsa_tensor = load_features_for_id(prot_id)
+        if ss_tensor is None or rsa_tensor is None:
+            return (prot_id, "missing_features")
         if ss_tensor.shape[0] != L or rsa_tensor.shape[0] != L:
             return (prot_id, "length_mismatch")
 
