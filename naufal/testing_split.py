@@ -14,7 +14,7 @@ MASTER_FASTA = os.path.join(OUT_SEQ_DIR, "testing_sequences.fasta")
 os.makedirs(OUT_SEQ_DIR, exist_ok=True)
 os.makedirs(OUT_PDB_DIR, exist_ok=True)
 
-# Step 1: Parse FASTA into dictionary {internal_id: sequence}
+# Step 1: Parse protein_sequences.fasta line-by-line
 print("Reading protein_sequences.fasta...")
 sequences = {}
 with open(FASTA_FILE, "r") as f:
@@ -30,64 +30,53 @@ with open(FASTA_FILE, "r") as f:
             seq_lines.append(line)
     if current_id and seq_lines:
         sequences[current_id] = "".join(seq_lines)
-
 print(f"Loaded {len(sequences)} sequences.\n")
 
-# Step 2: Load ID mapping {accession → internal ID}
-print("Loading UniProt ID mappings...")
-acc_to_internal = {}
-internal_to_acc = {}
-with open(ID_MAPPING_FILE, "r") as f:
-    for line in f:
-        acc, internal_id = line.strip().split("\t")
-        acc_to_internal[acc] = internal_id
-        internal_to_acc[internal_id] = acc
-print(f"Loaded {len(acc_to_internal)} mappings.\n")
-
-# Step 3: Randomly sample 20% of sequence IDs
+# Step 2: Random 20% test set
 random.seed(42)
 all_ids = list(sequences.keys())
 num_test = int(0.2 * len(all_ids))
 test_ids = set(random.sample(all_ids, num_test))
 
-# Step 4: Write master and per-sequence FASTA files
-print("Writing testing sequence files...")
+# Step 3: Write master FASTA + per-sequence files immediately
+print("Writing sequence files...")
+written = 0
 with open(MASTER_FASTA, "w") as master_file:
-    written = 0
     for pid in test_ids:
         seq = sequences[pid]
         # Master FASTA
         master_file.write(f">{pid}\n{seq}\n")
-        # Individual .fasta
+        # Individual FASTA
         with open(os.path.join(OUT_SEQ_DIR, f"{pid}.fasta"), "w") as indiv_file:
             indiv_file.write(f">{pid}\n{seq}\n")
         written += 1
         if written == 1 or written % 10000 == 0:
-            print(f"Written {written} testing sequence files...")
+            print(f"Written {written} sequence files...")
 
 print(f"Finished writing {written} sequences.\n")
 
-# Step 5: Copy matching PDBs
-print("Copying AlphaFold PDBs...")
+# Step 4: Stream through mapping file and copy PDBs immediately
+print("Copying matching PDBs...")
 copied, missing = 0, 0
-for pid in test_ids:
-    if pid not in internal_to_acc:
-        missing += 1
-        continue
-    acc = internal_to_acc[pid]
-    pdb_filename = f"AF-{acc}-F1-model_v4.pdb"
-    src_path = os.path.join(PDB_DIR, pdb_filename)
-    dst_path = os.path.join(OUT_PDB_DIR, pdb_filename)
-    if os.path.exists(src_path):
-        shutil.copy2(src_path, dst_path)
-        copied += 1
-        if copied == 1 or copied % 10000 == 0:
-            print(f"Copied {copied} PDB files...")
-    else:
-        missing += 1
+with open(ID_MAPPING_FILE, "r") as f:
+    for line in f:
+        acc, internal_id = line.strip().split("\t")
+        if internal_id not in test_ids:
+            continue
+        pdb_filename = f"AF-{acc}-F1-model_v4.pdb"
+        src_path = os.path.join(PDB_DIR, pdb_filename)
+        dst_path = os.path.join(OUT_PDB_DIR, pdb_filename)
+        if os.path.exists(src_path):
+            shutil.copy2(src_path, dst_path)
+            copied += 1
+            if copied == 1 or copied % 10000 == 0:
+                print(f"Copied {copied} PDB files...")
+        else:
+            missing += 1
 
-# Summary
+# Final summary
 print("\nTesting dataset creation complete.")
-print(f"Total sequences selected: {len(test_ids)}")
+print(f"Sequences written: {written}")
 print(f"PDBs copied: {copied}")
 print(f"PDBs missing: {missing}")
+
