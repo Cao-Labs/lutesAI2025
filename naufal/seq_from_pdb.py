@@ -1,5 +1,4 @@
 import os
-from collections import defaultdict
 
 # Paths
 PDB_DIR = "/data/shared/databases/alphaFold"
@@ -8,7 +7,7 @@ OUTPUT_FASTA = "/data/summer2020/naufal/training_data/protein_sequences.fasta"
 OUTPUT_DIR = os.path.dirname(OUTPUT_FASTA)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Standard amino acid mapping (from 3-letter to 1-letter codes)
+# Standard amino acid mapping (3-letter to 1-letter codes)
 aa3_to_aa1 = {
     "ALA": "A", "ARG": "R", "ASN": "N", "ASP": "D", "CYS": "C",
     "GLN": "Q", "GLU": "E", "GLY": "G", "HIS": "H", "ILE": "I",
@@ -16,18 +15,7 @@ aa3_to_aa1 = {
     "SER": "S", "THR": "T", "TRP": "W", "TYR": "Y", "VAL": "V",
 }
 
-# Map internal ID to UniProt accession
-print("Indexing ID mapping file...")
-internal_to_accession = {}
-with open(IDMAP_FILE, "r") as f:
-    for line in f:
-        parts = line.strip().split("\t")
-        if len(parts) == 2:
-            accession, internal_id = parts
-            internal_to_accession[internal_id] = accession
-print(f"Mapped {len(internal_to_accession)} IDs.\n")
-
-# Helper: extract sequence from ATOM lines
+# Helper: extract sequence from PDB ATOM lines
 def extract_sequence_from_pdb(pdb_path):
     sequence = []
     seen_residues = set()
@@ -38,11 +26,22 @@ def extract_sequence_from_pdb(pdb_path):
                 res_name = line[17:20].strip()
                 if res_num not in seen_residues:
                     seen_residues.add(res_num)
-                    aa = aa3_to_aa1.get(res_name, "X")  # unknown = X
+                    aa = aa3_to_aa1.get(res_name, "X")
                     sequence.append(aa)
     return "".join(sequence)
 
-# Stream PDB directory
+# Helper: find internal ID from accession by scanning mapping file
+def find_internal_id_from_accession(accession):
+    with open(IDMAP_FILE, "r") as f:
+        for line in f:
+            parts = line.strip().split("\t")
+            if len(parts) == 2:
+                acc, internal_id = parts
+                if acc == accession:
+                    return internal_id
+    return None
+
+# Stream PDB directory and write sequences
 print("Processing PDB files...")
 written = 0
 with open(OUTPUT_FASTA, "w") as out_fasta:
@@ -50,18 +49,14 @@ with open(OUTPUT_FASTA, "w") as out_fasta:
         if not fname.endswith(".pdb"):
             continue
 
-        # Extract internal ID
         try:
             parts = fname.split("-")
-            acc_part = parts[1]  # UniProt accession
-            internal_id = None
-            for k, v in internal_to_accession.items():
-                if v == acc_part:
-                    internal_id = k
-                    break
-            if internal_id is None:
-                continue
-        except:
+            accession = parts[1]
+        except IndexError:
+            continue
+
+        internal_id = find_internal_id_from_accession(accession)
+        if not internal_id:
             continue
 
         full_path = os.path.join(PDB_DIR, fname)
