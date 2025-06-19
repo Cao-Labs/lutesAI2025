@@ -5,7 +5,7 @@ from tempfile import NamedTemporaryFile
 # === File paths ===
 structure_file = "/data/summer2020/naufal/protein_structures.txt"
 id_file = "/data/summer2020/naufal/matched_ids.txt"
-output_file = "/data/summer2020/naufal/protein_features.txt"
+output_file = "/data/summer2020/naufal/new_features.txt"
 dssp_exec = "/data/shared/tools/DeepQA/tools/dsspcmbi"
 
 # === Load internal UniProt IDs ===
