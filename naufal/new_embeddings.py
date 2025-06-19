@@ -34,57 +34,44 @@ def fasta_reader(path):
 print("Processing sequences in batches of 32...")
 batch_size = 32
 batch = []
+count = 0
 
-total_processed = 0
+def process_batch(batch):
+    global count
+    try:
+        proteins = [ESMProtein(sequence=seq) for _, seq in batch]
+        encoded = [model.encode(p) for p in proteins]
+        sequence_batch = torch.stack([e.sequence for e in encoded])
+
+        with torch.no_grad():
+            outputs = model(sequence_tokens=sequence_batch).embeddings.detach().cpu()
+
+        for i, (seq_id, _) in enumerate(batch):
+            out = outputs[i]
+            out = torch.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
+            out = torch.round(out * 1000) / 1000
+            torch.save(out, os.path.join(OUTPUT_DIR, f"{seq_id}.pt"))
+
+        count += len(batch)
+        if count % 50 == 0 or count == len(batch):
+            print(f"Processed {count} sequences...")
+
+    except Exception as e:
+        print(f"Error processing batch starting with {batch[0][0]}: {e}")
+
+# Stream through the FASTA file
 for seq_id, seq in fasta_reader(FASTA_FILE):
     if not seq or len(seq) >= 30000:
         print(f"Skipping {seq_id} (invalid or too long)")
         continue
 
     batch.append((seq_id, seq))
-
     if len(batch) == batch_size:
-        try:
-            proteins = [ESMProtein(sequence=s) for _, s in batch]
-            encodings = model.encode(proteins)
-
-            with torch.no_grad():
-                outputs = model(
-                    sequence_tokens=encodings.sequence
-                ).embeddings.detach().cpu()
-
-            for i, (seq_id, _) in enumerate(batch):
-                embedding = outputs[i]
-                embedding = torch.nan_to_num(embedding, nan=0.0, posinf=0.0, neginf=0.0)
-                embedding = torch.round(embedding * 1000) / 1000
-                torch.save(embedding, os.path.join(OUTPUT_DIR, f"{seq_id}.pt"))
-
-            total_processed += len(batch)
-            print(f"Processed {total_processed} sequences...")
-        except Exception as e:
-            print(f"Error in batch: {e}")
+        process_batch(batch)
         batch = []
 
 # Final incomplete batch
 if batch:
-    try:
-        proteins = [ESMProtein(sequence=s) for _, s in batch]
-        encodings = model.encode(proteins)
-
-        with torch.no_grad():
-            outputs = model(
-                sequence_tokens=encodings.sequence
-            ).embeddings.detach().cpu()
-
-        for i, (seq_id, _) in enumerate(batch):
-            embedding = outputs[i]
-            embedding = torch.nan_to_num(embedding, nan=0.0, posinf=0.0, neginf=0.0)
-            embedding = torch.round(embedding * 1000) / 1000
-            torch.save(embedding, os.path.join(OUTPUT_DIR, f"{seq_id}.pt"))
-
-        total_processed += len(batch)
-        print(f"Processed {total_processed} sequences (final batch).")
-    except Exception as e:
-        print(f"Error in final batch: {e}")
+    process_batch(batch)
 
 print(f"Done. All valid sequence embeddings saved in: {OUTPUT_DIR}")
