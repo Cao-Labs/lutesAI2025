@@ -30,36 +30,35 @@ def fasta_reader(path):
         if identifier:
             yield identifier, "".join(seq)
 
-# Batch processing
-print("Processing sequences in batches of 32...")
+# Batch size config
 batch_size = 32
 batch = []
-count = 0
+total_processed = 0
 
 def process_batch(batch):
-    global count
-    try:
-        proteins = [ESMProtein(sequence=seq) for _, seq in batch]
-        encoded = [model.encode(p) for p in proteins]
-        sequence_batch = torch.stack([e.sequence for e in encoded])
+    global total_processed
+    for seq_id, seq in batch:
+        try:
+            protein = ESMProtein(sequence=seq)
+            protein_tensor = model.encode(protein)
 
-        with torch.no_grad():
-            outputs = model(sequence_tokens=sequence_batch).embeddings.detach().cpu()
+            with torch.no_grad():
+                output1 = model(sequence_tokens=protein_tensor.sequence[None]).embeddings.detach().cpu().numpy()[0]
 
-        for i, (seq_id, _) in enumerate(batch):
-            out = outputs[i]
-            out = torch.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
-            out = torch.round(out * 1000) / 1000
-            torch.save(out, os.path.join(OUTPUT_DIR, f"{seq_id}.pt"))
+            output1 = torch.tensor(output1)
+            output1 = torch.nan_to_num(output1, nan=0.0, posinf=0.0, neginf=0.0)
+            output1 = torch.round(output1 * 1000) / 1000
 
-        count += len(batch)
-        if count % 50 == 0 or count == len(batch):
-            print(f"Processed {count} sequences...")
+            torch.save(output1, os.path.join(OUTPUT_DIR, f"{seq_id}.pt"))
+            total_processed += 1
 
-    except Exception as e:
-        print(f"Error processing batch starting with {batch[0][0]}: {e}")
+            if total_processed % 50 == 0:
+                print(f"Processed {total_processed} sequences...")
 
-# Stream through the FASTA file
+        except Exception as e:
+            print(f"Error processing {seq_id}: {e}")
+
+print("Processing sequences in batches of 32...")
 for seq_id, seq in fasta_reader(FASTA_FILE):
     if not seq or len(seq) >= 30000:
         print(f"Skipping {seq_id} (invalid or too long)")
@@ -70,8 +69,9 @@ for seq_id, seq in fasta_reader(FASTA_FILE):
         process_batch(batch)
         batch = []
 
-# Final incomplete batch
+# Process any remaining sequences
 if batch:
     process_batch(batch)
 
 print(f"Done. All valid sequence embeddings saved in: {OUTPUT_DIR}")
+
