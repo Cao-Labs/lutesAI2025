@@ -32,7 +32,7 @@ def predict_protein_functions():
     """
     # File paths
     input_fasta = '/data/summer2020/naufal/testing_sequences.fasta'
-    output_dir = '/data/summer2020/Boen/output'
+    output_dir = '/data/summer2020/Boen/hifun_predictions'
     hifun_dir = '/data/shared/tools/HiFun'
     
     # Create output directory if it doesn't exist
