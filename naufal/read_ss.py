@@ -1,7 +1,7 @@
 import sys
 
 # ======== CONFIG ========
-FEATURES_FILE = "/data/summer2020/naufal/protein_features.txt"
+FEATURES_FILE = "/data/summer2020/naufal/new_features.txt"
 TARGET_ID = "COG6_ASPCL"  # <-- Replace with your desired protein ID
 # =========================
 
