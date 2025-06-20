@@ -1,7 +1,7 @@
 # seq_len.py
 
 FASTA_FILE = "/data/summer2020/naufal/training_data/protein_sequences.fasta"
-TARGET_ID = "COG6_ASPCL"  # Replace with the ID you want to check
+TARGET_ID = "104K_THEPA"  # Replace with the ID you want to check
 
 def get_sequence_length(fasta_path, target_id):
     with open(fasta_path, "r") as f:
