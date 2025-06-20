@@ -6,10 +6,10 @@ from tempfile import NamedTemporaryFile
 structure_file = "/data/summer2020/naufal/protein_structures.txt"
 id_file = "/data/summer2020/naufal/matched_ids.txt"
 fasta_file = "/data/summer2020/naufal/training_data/protein_sequences.fasta"
-output_file = "/data/summer2020/naufal/features_seq.txt"
+output_file = "/data/summer2020/naufal/features_seq_aligned_to_fasta.txt"
 dssp_exec = "/data/shared/tools/DeepQA/tools/dsspcmbi"
 
-# === Load full sequences from FASTA ===
+# === Load sequences from FASTA ===
 sequence_dict = {}
 with open(fasta_file, "r") as f:
     current_id = None
@@ -26,16 +26,16 @@ with open(fasta_file, "r") as f:
     if current_id:
         sequence_dict[current_id] = "".join(seq)
 
-# === Load internal UniProt IDs ===
+# === Load protein IDs ===
 with open(id_file, "r") as f:
     matched_ids = [line.strip() for line in f if line.strip()]
 
-# === Write aligned output ===
+# === Output file ===
 with open(output_file, "w") as out_f:
     current_lines = []
     protein_index = 0
 
-    def run_dssp_align_to_sequence(internal_id, pdb_lines, sequence):
+    def run_dssp_by_index(internal_id, pdb_lines, sequence):
         # Write temp PDB
         with NamedTemporaryFile(mode='w+', suffix=".pdb", delete=False) as tmp_pdb:
             tmp_pdb.writelines(pdb_lines)
@@ -65,9 +65,9 @@ with open(output_file, "w") as out_f:
                 print(f"Skipped {internal_id}: DSSP output malformed")
                 return
 
+            # Extract DSSP SS/RSA per index
             ss_list = []
             rsa_list = []
-
             for line in lines[start:]:
                 if len(line) < 38:
                     continue
@@ -80,36 +80,38 @@ with open(output_file, "w") as out_f:
                 except:
                     continue
 
-            # Align to sequence length
+            # Align by sequence index
             out_f.write(f"# {internal_id}\n")
             for i in range(len(sequence)):
                 if i < len(ss_list):
                     out_f.write(f"{ss_list[i]}\t{rsa_list[i]:.3f}\n")
                 else:
-                    out_f.write(f"X\t-1.000\n")
+                    out_f.write("X\t-1.000\n")
 
         finally:
             os.remove(tmp_pdb_path)
             if os.path.exists(tmp_dssp_path):
                 os.remove(tmp_dssp_path)
 
-    # === Process structure file ===
+    # === Process structures ===
     with open(structure_file, "r") as sf:
         for line in sf:
             if line.startswith("ATOM") and line[6:11].strip() == "1":
                 if current_lines:
                     if protein_index < len(matched_ids):
-                        protein_id = matched_ids[protein_index]
-                        if protein_id in sequence_dict:
-                            run_dssp_align_to_sequence(protein_id, current_lines, sequence_dict[protein_id])
+                        pid = matched_ids[protein_index]
+                        if pid in sequence_dict:
+                            run_dssp_by_index(pid, current_lines, sequence_dict[pid])
                         protein_index += 1
                     current_lines = []
             current_lines.append(line)
 
+        # Final protein
         if current_lines and protein_index < len(matched_ids):
-            protein_id = matched_ids[protein_index]
-            if protein_id in sequence_dict:
-                run_dssp_align_to_sequence(protein_id, current_lines, sequence_dict[protein_id])
+            pid = matched_ids[protein_index]
+            if pid in sequence_dict:
+                run_dssp_by_index(pid, current_lines, sequence_dict[pid])
 
-print("Done: Aligned features written to", output_file)
+print("Done: Aligned DSSP features written to", output_file)
+
 
