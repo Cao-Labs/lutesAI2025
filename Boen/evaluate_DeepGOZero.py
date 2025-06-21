@@ -1,463 +1,195 @@
-# -*- coding: utf-8 -*-
-"""
-DeepGOZero Protein Function Prediction Script
-Zero-shot GO term predictions using ontology embeddings
-"""
 import os
-import sys
-import logging
-import pandas as pd
-import numpy as np
-import pickle
-import argparse
-from collections import defaultdict
 import subprocess
+import pandas as pd
+from datetime import datetime
 from Bio import SeqIO
-from Bio.SeqRecord import SeqRecord
-from Bio.Seq import Seq
+import click as ck
 
-# DeepGOZero repository path
+# ==============================================================================
+# --- CONFIGURATION ---
+# YOU MUST EDIT THESE PATHS TO MATCH YOUR SYSTEM
+# ==============================================================================
+
+# 1. Path to your input protein sequences
+FASTA_FILE = "/data/summer2020/naufal/testing_sequences.fasta"
+
+# 2. Path to the main InterProScan executable shell script
+INTERPROSCAN_PATH = "/data/shared/tools/interproscan-5.75-106.0/interproscan.sh" # e.g., /opt/interproscan/interproscan.sh
+
+# 3. Path to the cloned DeepGOZero repository
 DEEPGOZERO_PATH = "/data/shared/tools/deepgozero"
-sys.path.append(DEEPGOZERO_PATH)
 
-# Assuming these imports based on the repository structure
-try:
-    import torch
-    import torch.nn as nn
-    from utils import Ontology, FUNC_DICT, NAMESPACES
-    from deepgozero_predict import DeepGOZeroModel, load_model_and_data
-except ImportError as e:
-    logging.warning(f"Could not import DeepGOZero modules: {e}")
+# 4. Path to the downloaded and extracted data from the DeepGOZero website
+#    (This directory should contain 'go.norm' and the 'mf', 'bp', 'cc' subdirectories)
+DEEPGOZERO_DATA_ROOT = "/data/shared/tools/deepgozero/data" # e.g., /data/shared/tools/deepgozero/data
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# 5. A directory to store all intermediate and final output files
+OUTPUT_DIR = "/data/summer2020/Boen/deepgozero_predictions"
 
-# Default paths - adjust these based on your setup
-DEFAULT_FASTA = "/data/summer2020/naufal/testing_sequences.fasta"
-DEFAULT_OUTPUT_DIR = "/data/summer2020/Boen/deepgozero_output"
-DIAMOND_DB = "/data/shared/tools/deepgozero/data/swissprot_exp.fasta"
-GO_OBO_FILE = "/data/shared/tools/deepgozero/data/go.obo"
+# 6. Which ontology to predict for: 'mf', 'bp', or 'cc'
+ONTOLOGY = 'bp'  # Options: 'mf' (Molecular Function), 'bp' (Biological Process), 'cc' (Cellular Component)
 
-def run_diamond_search(query_fasta, database, output_file, max_target_seqs=10000):
-    """
-    Run Diamond BLASTP search for sequence similarity
+
+# ==============================================================================
+# --- SCRIPT LOGIC (No edits needed below this line) ---
+# ==============================================================================
+
+def run_interproscan(fasta_file, output_tsv):
+    """Executes the InterProScan command-line tool."""
+    print("--- STEP 1: Running InterProScan ---")
+    print(f"Input: {fasta_file}")
+    print(f"Output: {output_tsv}")
     
-    Args:
-        query_fasta (str): Path to query FASTA file
-        database (str): Path to Diamond database
-        output_file (str): Output file for Diamond results
-        max_target_seqs (int): Maximum number of target sequences
-    
-    Returns:
-        str: Path to Diamond results file
-    """
-    logging.info("Running Diamond BLASTP search...")
-    
-    # Create Diamond database if it doesn't exist
-    db_file = database + ".dmnd"
-    if not os.path.exists(db_file):
-        logging.info("Creating Diamond database...")
-        cmd = f"diamond makedb --in {database} --db {database}"
-        subprocess.run(cmd, shell=True, check=True)
-    
-    # Run Diamond search
+    if not os.path.exists(INTERPROSCAN_PATH):
+        raise FileNotFoundError(f"InterProScan not found at: {INTERPROSCAN_PATH}. Please check the CONFIGURATION.")
+
     cmd = [
-        "diamond", "blastp",
-        "--query", query_fasta,
-        "--db", database,
-        "--out", output_file,
-        "--outfmt", "6", "qseqid", "sseqid", "bitscore",
-        "--max-target-seqs", str(max_target_seqs),
-        "--evalue", "0.001"
+        INTERPROSCAN_PATH,
+        "-i", fasta_file,
+        "-f", "TSV",
+        "-o", output_tsv,
+        "--gpa", # Get deep functional annotations
+        "--goterms" # Get GO terms
+    ]
+
+    print(f"Executing command: {' '.join(cmd)}")
+    print("This may take a very long time depending on your input file size...")
+    
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        print("InterProScan completed successfully.")
+    except subprocess.CalledProcessError as e:
+        print("ERROR: InterProScan failed to run.")
+        print("STDOUT:", e.stdout)
+        print("STDERR:", e.stderr)
+        raise e
+
+def create_prediction_dataframe(fasta_file, interpro_tsv, output_pkl):
+    """Parses InterProScan results and creates the required .pkl file."""
+    print("\n--- STEP 2: Creating Prediction-Ready DataFrame ---")
+    print(f"Input FASTA: {fasta_file}")
+    print(f"Input TSV: {interpro_tsv}")
+    print(f"Output PKL: {output_pkl}")
+    
+    # 1. Parse InterProScan TSV output
+    interpro_map = {}
+    with open(interpro_tsv, 'r') as f:
+        for line in f:
+            parts = line.strip().split('\t')
+            protein_id = parts[0]
+            if protein_id not in interpro_map:
+                interpro_map[protein_id] = set()
+            
+            # InterPro IDs are in the 12th column (index 11) if present
+            if len(parts) > 11 and parts[11].startswith("IPR"):
+                interpro_map[protein_id].add(parts[11])
+
+    # 2. Read protein IDs from the original FASTA file to maintain order
+    protein_ids = [record.id for record in SeqIO.parse(fasta_file, "fasta")]
+    interpros_list = [list(interpro_map.get(pid, set())) for pid in protein_ids]
+
+    # 3. Create and save the DataFrame
+    df = pd.DataFrame({'proteins': protein_ids, 'interpros': interpros_list})
+    df.to_pickle(output_pkl)
+    
+    print(f"Successfully created and saved DataFrame for {len(df)} proteins to {output_pkl}.")
+
+def run_deepgozero_prediction(input_pkl, ontology, output_dir):
+    """Runs the DeepGOZero prediction script and saves the results."""
+    print("\n--- STEP 3: Running DeepGOZero Prediction ---")
+    
+    prediction_script = os.path.join(DEEPGOZERO_PATH, "deepgozero_predict.py")
+    ontology_data_path = os.path.join(DEEPGOZERO_DATA_ROOT, ontology)
+    
+    # Verify required files exist
+    model_file = os.path.join(ontology_data_path, "deepgozero_zero_10.th")
+    terms_file = os.path.join(ontology_data_path, "terms_zero_10.pkl")
+    if not all(os.path.exists(p) for p in [prediction_script, model_file, terms_file]):
+        raise FileNotFoundError("A required DeepGOZero script or data file was not found. Check DEEPGOZERO_PATH and DEEPGOZERO_DATA_ROOT.")
+        
+    cmd = [
+        "python", prediction_script,
+        "--test-data-file", input_pkl,
+        "--model-file", model_file,
+        "--terms-file", terms_file,
+        "--device", "cpu"  # Change to "cuda:0" if you have a GPU
     ]
     
+    print(f"Executing command: {' '.join(cmd)}")
     try:
-        subprocess.run(cmd, check=True)
-        logging.info(f"Diamond search completed. Results saved to {output_file}")
-        return output_file
+        process = subprocess.run(cmd, check=True, capture_output=True, text=True, cwd=DEEPGOZERO_PATH)
+        print("Prediction script executed successfully.")
+        parse_and_save_results(process.stdout, ontology, input_pkl, output_dir)
     except subprocess.CalledProcessError as e:
-        logging.error(f"Diamond search failed: {e}")
-        raise
+        print("ERROR: DeepGOZero prediction script failed.")
+        print("STDOUT:", e.stdout)
+        print("STDERR:", e.stderr)
+        raise e
 
-def load_training_annotations(data_file):
-    """
-    Load training annotations for similarity-based predictions
+def parse_and_save_results(stdout, ontology, input_pkl, output_dir):
+    """Parses the prediction output from stdout and saves it to a CSV and summary file."""
+    print("\n--- STEP 4: Parsing and Saving Final Predictions ---")
+    predictions = []
+    # The authors' predict script seems to output a mix of info and results.
+    # We look for lines that match the "Protein GO:Term Score" format.
+    for line in stdout.strip().split('\n'):
+        parts = line.split()
+        if len(parts) == 3 and parts[1].startswith('GO:'):
+            try:
+                predictions.append({'Protein_ID': parts[0], 'GO_Term': parts[1], 'Score': float(parts[2])})
+            except (ValueError, IndexError):
+                continue
     
-    Args:
-        data_file (str): Path to training data pickle file
-    
-    Returns:
-        dict: Dictionary mapping protein IDs to GO annotations
-    """
-    logging.info(f"Loading training annotations from {data_file}")
-    
-    try:
-        train_df = pd.read_pickle(data_file)
-        annotations = {}
-        
-        for _, row in train_df.iterrows():
-            prot_id = row['proteins']
-            annots = set(row['prop_annotations'])
-            annotations[prot_id] = annots
-            
-        logging.info(f"Loaded annotations for {len(annotations)} proteins")
-        return annotations
-    except Exception as e:
-        logging.error(f"Failed to load training annotations: {e}")
-        return {}
-
-def predict_with_similarity(diamond_results, annotations, ontology):
-    """
-    Make predictions based on sequence similarity (Diamond results)
-    
-    Args:
-        diamond_results (str): Path to Diamond results file
-        annotations (dict): Training protein annotations
-        ontology (Ontology): GO ontology object
-    
-    Returns:
-        dict: Predictions for each query protein
-    """
-    logging.info("Making similarity-based predictions...")
-    
-    similarity_preds = defaultdict(dict)
-    
-    try:
-        with open(diamond_results, 'r') as f:
-            for line in f:
-                parts = line.strip().split('\t')
-                if len(parts) >= 3:
-                    query_id = parts[0]
-                    target_id = parts[1]
-                    bitscore = float(parts[2])
-                    
-                    # Get annotations for target protein
-                    if target_id in annotations:
-                        target_annots = annotations[target_id]
-                        
-                        # Transfer annotations weighted by similarity score
-                        for go_term in target_annots:
-                            if go_term in similarity_preds[query_id]:
-                                similarity_preds[query_id][go_term] = max(
-                                    similarity_preds[query_id][go_term], 
-                                    bitscore
-                                )
-                            else:
-                                similarity_preds[query_id][go_term] = bitscore
-        
-        # Normalize scores
-        for query_id in similarity_preds:
-            max_score = max(similarity_preds[query_id].values())
-            if max_score > 0:
-                for go_term in similarity_preds[query_id]:
-                    similarity_preds[query_id][go_term] /= max_score
-    
-    except Exception as e:
-        logging.error(f"Error in similarity-based prediction: {e}")
-    
-    logging.info(f"Generated similarity predictions for {len(similarity_preds)} proteins")
-    return dict(similarity_preds)
-
-def predict_with_deepgozero(fasta_file, model_path, terms_file, ontology):
-    """
-    Make predictions using DeepGOZero model
-    
-    Args:
-        fasta_file (str): Path to input FASTA file
-        model_path (str): Path to trained DeepGOZero model
-        terms_file (str): Path to GO terms file
-        ontology (Ontology): GO ontology object
-    
-    Returns:
-        dict: DeepGOZero predictions for each protein
-    """
-    logging.info("Making DeepGOZero predictions...")
-    
-    try:
-        # Load model and terms
-        terms_df = pd.read_pickle(terms_file)
-        terms = terms_df['gos'].values.flatten()
-        
-        # This is a simplified version - actual implementation would depend on
-        # the specific DeepGOZero model architecture and loading functions
-        model = torch.load(model_path, map_location='cpu')
-        model.eval()
-        
-        # Load sequences
-        sequences = {}
-        with open(fasta_file, 'r') as f:
-            for record in SeqIO.parse(f, 'fasta'):
-                sequences[record.id] = str(record.seq)
-        
-        deepgozero_preds = defaultdict(dict)
-        
-        # Process each sequence
-        for seq_id, sequence in sequences.items():
-            # Convert sequence to model input format
-            # This would need to be implemented based on DeepGOZero's input processing
-            seq_input = preprocess_sequence(sequence)  # Placeholder function
-            
-            with torch.no_grad():
-                # Get model predictions
-                predictions = model(seq_input)
-                predictions = torch.sigmoid(predictions).numpy()
-                
-                # Map predictions to GO terms
-                for i, score in enumerate(predictions):
-                    if i < len(terms):
-                        go_term = terms[i]
-                        deepgozero_preds[seq_id][go_term] = float(score)
-        
-        logging.info(f"Generated DeepGOZero predictions for {len(deepgozero_preds)} proteins")
-        return dict(deepgozero_preds)
-        
-    except Exception as e:
-        logging.error(f"Error in DeepGOZero prediction: {e}")
-        return {}
-
-def preprocess_sequence(sequence, max_length=1000):
-    """
-    Preprocess protein sequence for model input
-    This is a placeholder - actual implementation depends on DeepGOZero's preprocessing
-    
-    Args:
-        sequence (str): Protein sequence
-        max_length (int): Maximum sequence length
-    
-    Returns:
-        torch.Tensor: Preprocessed sequence tensor
-    """
-    # Amino acid to index mapping
-    aa_to_idx = {
-        'A': 1, 'R': 2, 'N': 3, 'D': 4, 'C': 5, 'Q': 6, 'E': 7, 'G': 8,
-        'H': 9, 'I': 10, 'L': 11, 'K': 12, 'M': 13, 'F': 14, 'P': 15,
-        'S': 16, 'T': 17, 'W': 18, 'Y': 19, 'V': 20, 'X': 21
-    }
-    
-    # Convert sequence to indices
-    seq_indices = [aa_to_idx.get(aa, 21) for aa in sequence[:max_length]]
-    
-    # Pad or truncate to max_length
-    if len(seq_indices) < max_length:
-        seq_indices.extend([0] * (max_length - len(seq_indices)))
-    
-    return torch.tensor(seq_indices, dtype=torch.long).unsqueeze(0)
-
-def combine_predictions(similarity_preds, deepgozero_preds, alpha=0.5):
-    """
-    Combine similarity-based and DeepGOZero predictions
-    
-    Args:
-        similarity_preds (dict): Similarity-based predictions
-        deepgozero_preds (dict): DeepGOZero predictions
-        alpha (float): Weight for similarity predictions (1-alpha for DeepGOZero)
-    
-    Returns:
-        dict: Combined predictions
-    """
-    logging.info("Combining predictions...")
-    
-    combined_preds = defaultdict(dict)
-    all_proteins = set(similarity_preds.keys()) | set(deepgozero_preds.keys())
-    
-    for protein_id in all_proteins:
-        sim_pred = similarity_preds.get(protein_id, {})
-        deep_pred = deepgozero_preds.get(protein_id, {})
-        
-        all_terms = set(sim_pred.keys()) | set(deep_pred.keys())
-        
-        for go_term in all_terms:
-            sim_score = sim_pred.get(go_term, 0.0)
-            deep_score = deep_pred.get(go_term, 0.0)
-            
-            combined_score = alpha * sim_score + (1 - alpha) * deep_score
-            combined_preds[protein_id][go_term] = combined_score
-    
-    return dict(combined_preds)
-
-def predict_protein_functions_deepgozero(fasta_file, output_dir, threshold=0.3,
-                                       model_path=None, terms_file=None,
-                                       train_data_file=None, use_diamond=True):
-    """
-    Predict protein functions using DeepGOZero
-    
-    Args:
-        fasta_file (str): Path to input FASTA file
-        output_dir (str): Output directory
-        threshold (float): Prediction threshold
-        model_path (str): Path to DeepGOZero model
-        terms_file (str): Path to GO terms file
-        train_data_file (str): Path to training data file
-        use_diamond (bool): Whether to use Diamond similarity search
-    
-    Returns:
-        pd.DataFrame: Prediction results
-    """
-    # Create output directory
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Load Gene Ontology
-    logging.info("Loading Gene Ontology...")
-    ontology = Ontology(GO_OBO_FILE, with_rels=True)
-    
-    predictions = {}
-    
-    # Diamond similarity predictions
-    if use_diamond:
-        try:
-            diamond_output = os.path.join(output_dir, "diamond_results.tsv")
-            run_diamond_search(fasta_file, DIAMOND_DB, diamond_output)
-            
-            # Load training annotations
-            if train_data_file and os.path.exists(train_data_file):
-                annotations = load_training_annotations(train_data_file)
-                similarity_preds = predict_with_similarity(diamond_output, annotations, ontology)
-                predictions['similarity'] = similarity_preds
-        except Exception as e:
-            logging.error(f"Diamond prediction failed: {e}")
-            predictions['similarity'] = {}
-    
-    # DeepGOZero predictions
-    if model_path and terms_file:
-        try:
-            deepgozero_preds = predict_with_deepgozero(fasta_file, model_path, terms_file, ontology)
-            predictions['deepgozero'] = deepgozero_preds
-        except Exception as e:
-            logging.error(f"DeepGOZero prediction failed: {e}")
-            predictions['deepgozero'] = {}
-    
-    # Combine predictions if both are available
-    if 'similarity' in predictions and 'deepgozero' in predictions:
-        combined_preds = combine_predictions(predictions['similarity'], predictions['deepgozero'])
-    elif 'similarity' in predictions:
-        combined_preds = predictions['similarity']
-    elif 'deepgozero' in predictions:
-        combined_preds = predictions['deepgozero']
-    else:
-        logging.error("No predictions generated")
-        return pd.DataFrame()
-    
-    # Process results
-    results_data = []
-    
-    for protein_id, go_predictions in combined_preds.items():
-        # Filter predictions above threshold
-        filtered_preds = {go_term: score for go_term, score in go_predictions.items() 
-                         if score >= threshold}
-        
-        if filtered_preds:
-            # Sort by score
-            sorted_preds = sorted(filtered_preds.items(), key=lambda x: x[1], reverse=True)
-            
-            go_terms = [item[0] for item in sorted_preds]
-            scores = [item[1] for item in sorted_preds]
-            
-            # Get GO term names and namespaces
-            go_names = []
-            go_namespaces = []
-            
-            for go_term in go_terms:
-                if ontology.has_term(go_term):
-                    go_names.append(ontology.get_term_name(go_term))
-                    go_namespaces.append(ontology.get_namespace(go_term))
-                else:
-                    go_names.append("Unknown")
-                    go_namespaces.append("Unknown")
-            
-            results_data.append({
-                'Protein_ID': protein_id,
-                'GO_Terms': ';'.join(go_terms),
-                'GO_Names': ';'.join(go_names),
-                'GO_Namespaces': ';'.join(go_namespaces),
-                'Prediction_Scores': ';'.join([f"{score:.4f}" for score in scores]),
-                'Num_Predictions': len(go_terms)
-            })
-        else:
-            results_data.append({
-                'Protein_ID': protein_id,
-                'GO_Terms': '',
-                'GO_Names': '',
-                'GO_Namespaces': '',
-                'Prediction_Scores': '',
-                'Num_Predictions': 0
-            })
-    
-    # Create results DataFrame
-    results_df = pd.DataFrame(results_data)
-    
-    # Save results
-    output_file = os.path.join(output_dir, f'deepgozero_predictions_th{threshold}.csv')
-    results_df.to_csv(output_file, index=False)
-    logging.info(f"Predictions saved to {output_file}")
-    
-    # Save summary statistics
-    summary_stats = {
-        'Total_Proteins': len(results_df),
-        'Threshold_Used': threshold,
-        'Proteins_with_Predictions': sum(1 for x in results_df['Num_Predictions'] if x > 0),
-        'Proteins_without_Predictions': sum(1 for x in results_df['Num_Predictions'] if x == 0),
-        'Average_Predictions_per_Protein': results_df['Num_Predictions'].mean(),
-        'Max_Predictions_per_Protein': results_df['Num_Predictions'].max(),
-        'Min_Predictions_per_Protein': results_df['Num_Predictions'].min()
-    }
-    
-    summary_df = pd.DataFrame([summary_stats])
-    summary_file = os.path.join(output_dir, f'deepgozero_summary_th{threshold}.csv')
-    summary_df.to_csv(summary_file, index=False)
-    
-    # Print summary
-    print(f"\n=== DeepGOZero Prediction Summary ===")
-    print(f"Total proteins processed: {summary_stats['Total_Proteins']}")
-    print(f"Threshold used: {threshold}")
-    print(f"Proteins with predictions: {summary_stats['Proteins_with_Predictions']}")
-    print(f"Proteins without predictions: {summary_stats['Proteins_without_Predictions']}")
-    print(f"Average predictions per protein: {summary_stats['Average_Predictions_per_Protein']:.2f}")
-    print(f"Results saved to: {output_dir}")
-    
-    return results_df
-
-def main():
-    """
-    Main function to run DeepGOZero predictions
-    """
-    parser = argparse.ArgumentParser(description='DeepGOZero Protein Function Prediction')
-    parser.add_argument('--fasta', default=DEFAULT_FASTA, help='Input FASTA file')
-    parser.add_argument('--output', default=DEFAULT_OUTPUT_DIR, help='Output directory')
-    parser.add_argument('--threshold', type=float, default=0.3, help='Prediction threshold')
-    parser.add_argument('--model', help='Path to DeepGOZero model file')
-    parser.add_argument('--terms', help='Path to GO terms file')
-    parser.add_argument('--train-data', help='Path to training data file')
-    parser.add_argument('--no-diamond', action='store_true', help='Skip Diamond similarity search')
-    
-    args = parser.parse_args()
-    
-    # Check input file
-    if not os.path.exists(args.fasta):
-        logging.error(f"Input FASTA file not found: {args.fasta}")
+    if not predictions:
+        print("Warning: No predictions were parsed. The prediction script might have failed or produced no output.")
+        print("Full raw output:\n", stdout)
         return
+        
+    df = pd.DataFrame(predictions)
+    csv_path = os.path.join(output_dir, f"predictions_{ontology}.csv")
+    summary_path = os.path.join(output_dir, f"summary_{ontology}.txt")
     
-    # Set default paths if not provided
-    if not args.model:
-        args.model = os.path.join(DEEPGOZERO_PATH, "models/deepgozero_model.pth")
-    if not args.terms:
-        args.terms = os.path.join(DEEPGOZERO_PATH, "data/terms.pkl")
-    if not args.train_data:
-        args.train_data = os.path.join(DEEPGOZERO_PATH, "data/train_data.pkl")
-    
-    # Run predictions
-    logging.info("Starting DeepGOZero protein function prediction...")
-    predictions = predict_protein_functions_deepgozero(
-        fasta_file=args.fasta,
-        output_dir=args.output,
-        threshold=args.threshold,
-        model_path=args.model,
-        terms_file=args.terms,
-        train_data_file=args.train_data,
-        use_diamond=not args.no_diamond
-    )
-    
-    logging.info("Prediction completed successfully!")
-    logging.info(f"Check output directory: {args.output}")
+    df.to_csv(csv_path, index=False)
+    print(f"Saved {len(df)} predictions to {csv_path}")
 
-if __name__ == '__main__':
+    with open(summary_path, "w") as f:
+        f.write(f"--- DeepGOZero Prediction Summary ---\n")
+        f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Ontology: {ontology.upper()}\n\n")
+        f.write(f"Input FASTA file: {FASTA_FILE}\n")
+        f.write(f"Number of unique proteins with predictions: {df['Protein_ID'].nunique()}\n")
+        f.write(f"Total number of GO term predictions: {len(df)}\n\n")
+        f.write(f"Results saved to: {csv_path}\n")
+    print(f"Summary saved to {summary_path}")
+
+
+@ck.command()
+@ck.option('--force-rerun', is_flag=True, help="Force re-running InterProScan and data preparation even if output files exist.")
+def main(force_rerun):
+    """Main function to orchestrate the entire pipeline."""
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    
+    # Define intermediate file paths
+    interpro_output_tsv = os.path.join(OUTPUT_DIR, "interproscan_results.tsv")
+    prediction_input_pkl = os.path.join(OUTPUT_DIR, "prediction_input.pkl")
+    
+    # --- Step 1 ---
+    if force_rerun or not os.path.exists(interpro_output_tsv):
+        run_interproscan(FASTA_FILE, interpro_output_tsv)
+    else:
+        print(f"--- STEP 1: SKIPPED --- Found existing InterProScan results at {interpro_output_tsv}. Use --force-rerun to run again.")
+    
+    # --- Step 2 ---
+    if force_rerun or not os.path.exists(prediction_input_pkl):
+        create_prediction_dataframe(FASTA_FILE, interpro_output_tsv, prediction_input_pkl)
+    else:
+        print(f"\n--- STEP 2: SKIPPED --- Found existing prediction PKL at {prediction_input_pkl}. Use --force-rerun to run again.")
+
+    # --- Step 3 & 4 ---
+    run_deepgozero_prediction(prediction_input_pkl, ONTOLOGY, OUTPUT_DIR)
+    
+    print("\nPipeline finished successfully!")
+
+
+if __name__ == "__main__":
     main()
