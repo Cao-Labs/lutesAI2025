@@ -47,29 +47,38 @@ for fname in os.listdir(EMBEDDINGS_DIR):
 
     prot_id = fname[:-3]
     pt_path = os.path.join(EMBEDDINGS_DIR, fname)
+
     try:
+        print(f"[Loading] {prot_id}...")
         embedding = torch.load(pt_path)
+        print(f"[Loaded] {prot_id} | Shape: {embedding.shape}")
+
         embedding = embedding[1:-1, :]  # Drop first and last
+        print(f"[Trimmed] {prot_id} | New shape: {embedding.shape}")
 
         ss_tensor, rsa_tensor = get_features(prot_id)
         if ss_tensor is None or rsa_tensor is None:
+            print(f"[Skipped] {prot_id}: Missing SS/RSA features")
             skipped += 1
             continue
 
         if ss_tensor.shape[0] != embedding.shape[0]:
+            print(f"[Skipped] {prot_id}: Length mismatch (SS/RSA vs Embedding)")
             skipped += 1
             continue
 
+        print(f"[Appending] {prot_id}")
         combined = torch.cat([embedding, ss_tensor, rsa_tensor], dim=1)
 
-        # Pad or trim
         if combined.shape[0] < L_FIXED:
+            print(f"[Padding] {prot_id}")
             pad = torch.zeros((L_FIXED - combined.shape[0], D_FINAL))
             combined = torch.cat([combined, pad], dim=0)
         elif combined.shape[0] > L_FIXED:
+            print(f"[Truncating] {prot_id}")
             combined = combined[:L_FIXED, :]
 
-        # Normalize
+        print(f"[Normalizing] {prot_id}")
         min_vals = combined.min(dim=0, keepdim=True).values
         max_vals = combined.max(dim=0, keepdim=True).values
         diff = max_vals - min_vals
@@ -87,9 +96,7 @@ for fname in os.listdir(EMBEDDINGS_DIR):
         print(f"[Error] Skipped {prot_id}: {str(e)}")
         continue
 
-print(f"\nDONE: {processed} processed | {skipped} skipped")
-
-
+print(f"\n🎉 DONE: {processed} processed | {skipped} skipped")
 
 
 
