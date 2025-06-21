@@ -4,6 +4,8 @@ import pandas as pd
 from datetime import datetime
 from Bio import SeqIO
 import click as ck
+import time               # --- NEW ---
+import multiprocessing    # --- NEW ---
 
 # ==============================================================================
 # --- CONFIGURATION ---
@@ -14,63 +16,112 @@ import click as ck
 FASTA_FILE = "/data/summer2020/naufal/testing_sequences.fasta"
 
 # 2. Path to the main InterProScan executable shell script
-INTERPROSCAN_PATH = "/data/shared/tools/interproscan-5.75-106.0/interproscan.sh" # e.g., /opt/interproscan/interproscan.sh
+INTERPROSCAN_PATH = "/home/lutesAI2025/tools/interproscan-5.75-106.0/interproscan.sh"
 
 # 3. Path to the cloned DeepGOZero repository
 DEEPGOZERO_PATH = "/data/shared/tools/deepgozero"
 
 # 4. Path to the downloaded and extracted data from the DeepGOZero website
-#    (This directory should contain 'go.norm' and the 'mf', 'bp', 'cc' subdirectories)
-DEEPGOZERO_DATA_ROOT = "/data/shared/tools/deepgozero/data" # e.g., /data/shared/tools/deepgozero/data
+DEEPGOZERO_DATA_ROOT = "/data/shared/tools/deepgozero/data"
 
 # 5. A directory to store all intermediate and final output files
-OUTPUT_DIR = "/data/summer2020/Boen/deepgozero_predictions"
+OUTPUT_DIR = "/data/summer2020/Boen/deepgozero_pipeline_output"
 
 # 6. Which ontology to predict for: 'mf', 'bp', or 'cc'
-ONTOLOGY = 'bp'  # Options: 'mf' (Molecular Function), 'bp' (Biological Process), 'cc' (Cellular Component)
+ONTOLOGY = 'bp'
 
+# 7. Number of CPU cores for InterProScan
+CPU_CORES = "8"
 
 # ==============================================================================
 # --- SCRIPT LOGIC (No edits needed below this line) ---
 # ==============================================================================
 
-def run_interproscan(fasta_file, output_tsv):
-    """Executes the InterProScan command-line tool."""
-    print("--- STEP 1: Running InterProScan ---")
-    print(f"Input: {fasta_file}")
-    print(f"Output: {output_tsv}")
-    
-    if not os.path.exists(INTERPROSCAN_PATH):
-        raise FileNotFoundError(f"InterProScan not found at: {INTERPROSCAN_PATH}. Please check the CONFIGURATION.")
+STATUS_FILE = os.path.join(OUTPUT_DIR, "status.txt")
 
+# --- NEW ---
+def update_status(message):
+    """Writes a timestamped message to the status file."""
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    with open(STATUS_FILE, "w") as f:
+        f.write(f"{now} - {message}\n")
+    # Also print to the main log for debugging
+    print(message)
+
+# --- NEW ---
+def count_fasta_proteins(fasta_file):
+    """Counts the number of sequences in a FASTA file."""
+    try:
+        return sum(1 for _ in SeqIO.parse(fasta_file, "fasta"))
+    except FileNotFoundError:
+        return 0
+
+# --- NEW ---
+def monitor_interproscan_progress(tsv_file, total_proteins, status_file_path):
+    """A separate process to monitor the InterProScan output file."""
+    while True:
+        time.sleep(60) # Check once every minute
+        if not os.path.exists(tsv_file):
+            continue
+        try:
+            # Efficiently count unique proteins processed so far
+            with open(tsv_file, 'r') as f:
+                processed_ids = {line.split('\t')[0] for line in f}
+            
+            processed_count = len(processed_ids)
+            percentage = (processed_count / total_proteins) * 100
+            
+            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            message = (f"STEP 1: InterProScan in progress... "
+                       f"Processed {processed_count} / {total_proteins} proteins ({percentage:.2f}%)")
+            with open(status_file_path, "w") as f:
+                f.write(f"{now} - {message}\n")
+        except Exception as e:
+            # If there's an error reading the file (e.g., it's being written), just skip
+            continue
+
+
+def run_interproscan(fasta_file, output_tsv, total_proteins):
+    """Executes InterProScan and starts a parallel monitoring process."""
+    update_status("STEP 1: Starting InterProScan analysis...")
+    
     cmd = [
-        INTERPROSCAN_PATH,
-        "-i", fasta_file,
-        "-f", "TSV",
-        "-o", output_tsv,
-        "--goterms" # Get GO terms
+        INTERPROSCAN_PATH, "-i", fasta_file, "-f", "TSV", "-o", output_tsv,
+        "--goterms", "-cpu", CPU_CORES
     ]
 
-    print(f"Executing command: {' '.join(cmd)}")
-    print("This may take a very long time depending on your input file size...")
-    
+    # --- NEW: Start the monitor process ---
+    monitor = multiprocessing.Process(
+        target=monitor_interproscan_progress,
+        args=(output_tsv, total_proteins, STATUS_FILE)
+    )
+    monitor.daemon = True
+    monitor.start()
+
     try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
-        print("InterProScan completed successfully.")
-    except subprocess.CalledProcessError as e:
-        print("ERROR: InterProScan failed to run.")
-        print("STDOUT:", e.stdout)
-        print("STDERR:", e.stderr)
-        raise e
+        # Using Popen to run InterProScan in a non-blocking way
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        
+        # Wait for the process to complete
+        stdout, stderr = process.communicate()
+
+        if process.returncode != 0:
+            # If InterProScan failed, write its error to the status file and raise exception
+            error_message = f"InterProScan failed with exit code {process.returncode}. STDERR: {stderr}"
+            update_status(f"ERROR: {error_message}")
+            raise subprocess.CalledProcessError(process.returncode, cmd, output=stdout, stderr=stderr)
+        
+        update_status(f"STEP 1: InterProScan completed successfully. Processed {total_proteins} proteins.")
+
+    finally:
+        # --- NEW: Terminate the monitor process ---
+        monitor.terminate()
+        monitor.join()
 
 def create_prediction_dataframe(fasta_file, interpro_tsv, output_pkl):
     """Parses InterProScan results and creates the required .pkl file."""
-    print("\n--- STEP 2: Creating Prediction-Ready DataFrame ---")
-    print(f"Input FASTA: {fasta_file}")
-    print(f"Input TSV: {interpro_tsv}")
-    print(f"Output PKL: {output_pkl}")
+    update_status("STEP 2: Creating Prediction-Ready DataFrame...")
     
-    # 1. Parse InterProScan TSV output
     interpro_map = {}
     with open(interpro_tsv, 'r') as f:
         for line in f:
@@ -78,59 +129,44 @@ def create_prediction_dataframe(fasta_file, interpro_tsv, output_pkl):
             protein_id = parts[0]
             if protein_id not in interpro_map:
                 interpro_map[protein_id] = set()
-            
-            # InterPro IDs are in the 12th column (index 11) if present
             if len(parts) > 11 and parts[11].startswith("IPR"):
                 interpro_map[protein_id].add(parts[11])
 
-    # 2. Read protein IDs from the original FASTA file to maintain order
     protein_ids = [record.id for record in SeqIO.parse(fasta_file, "fasta")]
     interpros_list = [list(interpro_map.get(pid, set())) for pid in protein_ids]
 
-    # 3. Create and save the DataFrame
     df = pd.DataFrame({'proteins': protein_ids, 'interpros': interpros_list})
     df.to_pickle(output_pkl)
-    
-    print(f"Successfully created and saved DataFrame for {len(df)} proteins to {output_pkl}.")
+    update_status("STEP 2: DataFrame created successfully.")
 
 def run_deepgozero_prediction(input_pkl, ontology, output_dir):
     """Runs the DeepGOZero prediction script and saves the results."""
-    print("\n--- STEP 3: Running DeepGOZero Prediction ---")
+    update_status("STEP 3: Running DeepGOZero prediction...")
     
     prediction_script = os.path.join(DEEPGOZERO_PATH, "deepgozero_predict.py")
     ontology_data_path = os.path.join(DEEPGOZERO_DATA_ROOT, ontology)
     
-    # Verify required files exist
     model_file = os.path.join(ontology_data_path, "deepgozero_zero_10.th")
     terms_file = os.path.join(ontology_data_path, "terms_zero_10.pkl")
-    if not all(os.path.exists(p) for p in [prediction_script, model_file, terms_file]):
-        raise FileNotFoundError("A required DeepGOZero script or data file was not found. Check DEEPGOZERO_PATH and DEEPGOZERO_DATA_ROOT.")
         
     cmd = [
-        "python", prediction_script,
-        "--test-data-file", input_pkl,
-        "--model-file", model_file,
-        "--terms-file", terms_file,
-        "--device", "cpu"  # Change to "cuda:0" if you have a GPU
+        "python", prediction_script, "--test-data-file", input_pkl,
+        "--model-file", model_file, "--terms-file", terms_file, "--device", "cuda:0"
     ]
     
-    print(f"Executing command: {' '.join(cmd)}")
     try:
         process = subprocess.run(cmd, check=True, capture_output=True, text=True, cwd=DEEPGOZERO_PATH)
-        print("Prediction script executed successfully.")
+        update_status("STEP 3: DeepGOZero prediction completed.")
         parse_and_save_results(process.stdout, ontology, input_pkl, output_dir)
     except subprocess.CalledProcessError as e:
-        print("ERROR: DeepGOZero prediction script failed.")
-        print("STDOUT:", e.stdout)
-        print("STDERR:", e.stderr)
+        error_message = f"DeepGOZero failed. STDERR: {e.stderr}"
+        update_status(f"ERROR: {error_message}")
         raise e
 
 def parse_and_save_results(stdout, ontology, input_pkl, output_dir):
     """Parses the prediction output from stdout and saves it to a CSV and summary file."""
-    print("\n--- STEP 4: Parsing and Saving Final Predictions ---")
+    update_status("STEP 4: Parsing and Saving Final Predictions...")
     predictions = []
-    # The authors' predict script seems to output a mix of info and results.
-    # We look for lines that match the "Protein GO:Term Score" format.
     for line in stdout.strip().split('\n'):
         parts = line.split()
         if len(parts) == 3 and parts[1].startswith('GO:'):
@@ -139,27 +175,10 @@ def parse_and_save_results(stdout, ontology, input_pkl, output_dir):
             except (ValueError, IndexError):
                 continue
     
-    if not predictions:
-        print("Warning: No predictions were parsed. The prediction script might have failed or produced no output.")
-        print("Full raw output:\n", stdout)
-        return
-        
     df = pd.DataFrame(predictions)
     csv_path = os.path.join(output_dir, f"predictions_{ontology}.csv")
-    summary_path = os.path.join(output_dir, f"summary_{ontology}.txt")
-    
     df.to_csv(csv_path, index=False)
-    print(f"Saved {len(df)} predictions to {csv_path}")
-
-    with open(summary_path, "w") as f:
-        f.write(f"--- DeepGOZero Prediction Summary ---\n")
-        f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"Ontology: {ontology.upper()}\n\n")
-        f.write(f"Input FASTA file: {FASTA_FILE}\n")
-        f.write(f"Number of unique proteins with predictions: {df['Protein_ID'].nunique()}\n")
-        f.write(f"Total number of GO term predictions: {len(df)}\n\n")
-        f.write(f"Results saved to: {csv_path}\n")
-    print(f"Summary saved to {summary_path}")
+    update_status(f"STEP 4: Saved {len(df)} predictions to {csv_path}")
 
 
 @ck.command()
@@ -167,27 +186,30 @@ def parse_and_save_results(stdout, ontology, input_pkl, output_dir):
 def main(force_rerun):
     """Main function to orchestrate the entire pipeline."""
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    update_status("Pipeline starting...")
     
-    # Define intermediate file paths
     interpro_output_tsv = os.path.join(OUTPUT_DIR, "interproscan_results.tsv")
     prediction_input_pkl = os.path.join(OUTPUT_DIR, "prediction_input.pkl")
     
-    # --- Step 1 ---
+    total_proteins = count_fasta_proteins(FASTA_FILE)
+    if total_proteins == 0:
+        update_status(f"ERROR: No proteins found in FASTA file: {FASTA_FILE}")
+        return
+    update_status(f"Found {total_proteins} proteins in input file.")
+
     if force_rerun or not os.path.exists(interpro_output_tsv):
-        run_interproscan(FASTA_FILE, interpro_output_tsv)
+        run_interproscan(FASTA_FILE, interpro_output_tsv, total_proteins)
     else:
-        print(f"--- STEP 1: SKIPPED --- Found existing InterProScan results at {interpro_output_tsv}. Use --force-rerun to run again.")
+        update_status("STEP 1: SKIPPED - Found existing InterProScan results.")
     
-    # --- Step 2 ---
     if force_rerun or not os.path.exists(prediction_input_pkl):
         create_prediction_dataframe(FASTA_FILE, interpro_output_tsv, prediction_input_pkl)
     else:
-        print(f"\n--- STEP 2: SKIPPED --- Found existing prediction PKL at {prediction_input_pkl}. Use --force-rerun to run again.")
+        update_status("STEP 2: SKIPPED - Found existing prediction PKL.")
 
-    # --- Step 3 & 4 ---
     run_deepgozero_prediction(prediction_input_pkl, ONTOLOGY, OUTPUT_DIR)
     
-    print("\nPipeline finished successfully!")
+    update_status("Pipeline finished successfully!")
 
 
 if __name__ == "__main__":
