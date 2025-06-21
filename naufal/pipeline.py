@@ -14,7 +14,8 @@ D_FINAL = D_ORIG + 4 + 1  # 4 for SS one-hot, 1 for RSA
 ss_vocab = ['H', 'E', 'C', 'L']
 ss_to_onehot = {ch: torch.eye(len(ss_vocab))[i] for i, ch in enumerate(ss_vocab)}
 
-# === Step 1: Pre-index the features file ===
+# === Step 1: Load and index features file ===
+print("[INFO] Loading and indexing features file...")
 features_dict = {}
 with open(FEATURES_FILE, "r") as f:
     current_id = None
@@ -39,14 +40,16 @@ with open(FEATURES_FILE, "r") as f:
                 rsa_list.append(float(rsa))
             except:
                 continue
-    # Save last one
+    # Save last block
     if current_id and ss_list and rsa_list:
         features_dict[current_id] = (
             torch.stack(ss_list),
             torch.tensor(rsa_list).unsqueeze(1)
         )
 
-# === Step 2: Process embeddings one by one ===
+print(f"[INFO] Loaded {len(features_dict)} protein features.")
+
+# === Step 2: Process embeddings ===
 processed = 0
 skipped = 0
 
@@ -99,10 +102,11 @@ for fname in os.listdir(EMBEDDINGS_DIR):
 
     except Exception as e:
         skipped += 1
-        print(f"[❌ Error] Skipped {prot_id}: {str(e)}")
+        print(f"[Error] Skipped {prot_id}: {str(e)}")
         continue
 
-print(f"\n🎉 DONE: {processed} processed | {skipped} skipped")
+print(f"\nDONE: {processed} processed | {skipped} skipped")
+
 
 
 
