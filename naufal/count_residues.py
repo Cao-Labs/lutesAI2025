@@ -22,6 +22,6 @@ def count_residues(file_path, target_id):
 # Example usage
 if __name__ == "__main__":
     file_path = "/data/summer2020/naufal/features_dssp_direct.txt"
-    target_id = "104K_THEPA"
+    target_id = "COG6_ASPCL"
     result = count_residues(file_path, target_id)
     print(f"Number of residues for {target_id}: {result}")
