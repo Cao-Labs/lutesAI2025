@@ -48,7 +48,6 @@ def run_interproscan(fasta_file, output_tsv):
         "-i", fasta_file,
         "-f", "TSV",
         "-o", output_tsv,
-        "--gpa", # Get deep functional annotations
         "--goterms" # Get GO terms
     ]
 
