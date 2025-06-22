@@ -2,12 +2,12 @@ import os
 import torch
 
 # === Config ===
-EMBEDDINGS_DIR = "/data/summer2020/naufal/esm3_embeddings"
+EMBEDDINGS_DIR = "/data/summer2020/naufal/esm3_embeddings_new"
 FEATURES_FILE = "/data/summer2020/naufal/features_dssp_direct.txt"
 OUTPUT_DIR = "/data/summer2020/naufal/final_embeddings"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-L_FIXED = 1895
+L_FIXED = 1918
 D_ORIG = 1536
 D_FINAL = D_ORIG + 4 + 1  # 4 for SS one-hot, 1 for RSA
 
