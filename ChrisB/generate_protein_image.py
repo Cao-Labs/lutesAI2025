@@ -9,18 +9,25 @@ from esm.utils.constants.models import ESM3_OPEN_SMALL
 
 def load_esm3_model():
     print("Loading ESM-3 model (multimodal, from Meta)...")
-    model = ESM3.from_pretrained(ESM3_OPEN_SMALL, device=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = ESM3.from_pretrained(ESM3_OPEN_SMALL, device=device)
     model.eval().to(torch.float32)
     return model
 
 def generate_embedding(model, sequence):
+    # Wrap sequence
     protein = ESMProtein(sequence=sequence)
+
+    # Tokenize using model.encode()
+    protein_tensor = model.encode(protein)
+
+    # Run forward and get embedding
     with torch.no_grad():
         result = model.forward_and_sample(
-            protein,
+            protein_tensor,
             SamplingConfig(return_per_residue_embeddings=True)
         )
-        embedding = result.per_residue_embedding  # [L x D] tensor
+        embedding = result.per_residue_embedding  # [L x D]
         embedding = torch.nan_to_num(embedding, nan=0.0, posinf=0.0, neginf=0.0)
     return embedding
 
@@ -36,7 +43,7 @@ def save_image(matrix, out_path):
     plt.imshow(matrix, cmap='viridis')
     plt.title("Protein Feature Image (ESM-3)")
     plt.colorbar()
-    plt.savefig(out_path)
+    plt.savefig(out_path, bbox_inches='tight')
     print(f"Image saved to {out_path}")
 
 def main():
