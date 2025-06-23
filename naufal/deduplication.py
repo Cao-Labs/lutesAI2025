@@ -2,47 +2,64 @@ import os
 import torch
 import hashlib
 
-# Path to directory with .pt files
-EMBEDDINGS_DIR = "/data/summer2020/naufal/esm3_embeddings"
-BATCH_SIZE = 10000
+# === Config ===
+EMBEDDINGS_DIR = "/data/summer2020/naufal/esm3_embeddings_new"
+FEATURES_FILE = "/data/summer2020/naufal/features_dssp_direct.txt"
+FEATURES_OUTPUT = "/data/summer2020/naufal/features_dssp_deduplicated.txt"
 
-# Track hashes we've seen
-seen_hashes = {}
-duplicates = 0
-processed = 0
+# === Step 1: Hash tensor contents and track duplicates ===
+def tensor_hash(tensor):
+    return hashlib.sha256(tensor.numpy().tobytes()).hexdigest()
 
-print("Starting deduplication (batch size = 10,000)...\n")
+print("[INFO] Scanning embeddings for duplicate content...")
 
-# Get all .pt filenames
-all_filenames = [f for f in os.listdir(EMBEDDINGS_DIR) if f.endswith(".pt")]
-total_files = len(all_filenames)
+hash_to_id = {}
+duplicate_ids = set()
 
-for i in range(0, total_files, BATCH_SIZE):
-    batch_filenames = all_filenames[i:i + BATCH_SIZE]
+for fname in os.listdir(EMBEDDINGS_DIR):
+    if not fname.endswith(".pt"):
+        continue
 
-    for fname in batch_filenames:
-        fpath = os.path.join(EMBEDDINGS_DIR, fname)
+    prot_id = fname[:-3]
+    fpath = os.path.join(EMBEDDINGS_DIR, fname)
 
-        try:
-            tensor = torch.load(fpath, map_location="cpu")
-            tensor_bytes = tensor.numpy().tobytes()
-            tensor_hash = hashlib.sha1(tensor_bytes).hexdigest()
+    try:
+        tensor = torch.load(fpath)
+        h = tensor_hash(tensor)
 
-            if tensor_hash in seen_hashes:
-                os.remove(fpath)
-                duplicates += 1
-            else:
-                seen_hashes[tensor_hash] = fname
+        if h in hash_to_id:
+            # Duplicate detected
+            duplicate_ids.add(prot_id)
+            os.remove(fpath)
+            print(f"[Deleted] Duplicate embedding: {prot_id} (same as {hash_to_id[h]})")
+        else:
+            hash_to_id[h] = prot_id
+    except Exception as e:
+        print(f"[Error] Could not read {fname}: {e}")
+        continue
 
-            processed += 1
+print(f"[INFO] Removed {len(duplicate_ids)} duplicate .pt files.")
 
-        except Exception as e:
-            print(f"Failed to process {fname}: {e}")
+# === Step 2: Filter features_dssp_direct.txt ===
+print("[INFO] Cleaning features_dssp_direct.txt...")
 
-    print(f"Batch {i // BATCH_SIZE + 1}: Processed {min(i + BATCH_SIZE, total_files)} / {total_files} files")
+with open(FEATURES_FILE, "r") as f:
+    lines = f.readlines()
 
-# Final summary
-print("\nFinished deduplication.")
-print(f"Total files processed: {processed}")
-print(f"Duplicates removed: {duplicates}")
-print(f"Unique embeddings retained: {len(seen_hashes)}")
+deduplicated_lines = []
+write_block = False
+current_id = None
+
+for line in lines:
+    stripped = line.strip()
+    if stripped.startswith("#"):
+        current_id = stripped[1:]
+        write_block = current_id not in duplicate_ids
+    if write_block:
+        deduplicated_lines.append(line)
+
+with open(FEATURES_OUTPUT, "w") as f:
+    f.writelines(deduplicated_lines)
+
+print(f"[DONE] Saved cleaned features to {FEATURES_OUTPUT}")
+
