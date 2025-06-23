@@ -7,7 +7,7 @@ FEATURES_FILE = "/data/summer2020/naufal/features_dssp_direct.txt"
 OUTPUT_DIR = "/data/summer2020/naufal/final_embeddings"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-L_FIXED = 1918
+L_FIXED = 1913
 D_ORIG = 1536
 D_FINAL = D_ORIG + 4 + 1  # 4 for SS one-hot, 1 for RSA
 
