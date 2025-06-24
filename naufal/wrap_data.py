@@ -19,7 +19,7 @@ class ProteinFunctionDataset(Dataset):
         go_terms_set = set()
 
         print("[INFO] Parsing GO annotations...")
-        with open(go_mapping_file, "r") as f:
+        with open(self.go_mapping_file, "r") as f:
             for line in f:
                 pid, terms = line.strip().split("\t")
                 if pid in self.ids:
@@ -55,18 +55,20 @@ if __name__ == "__main__":
     # Create the dataset
     dataset = ProteinFunctionDataset(EMBEDDING_DIR, GO_MAPPING_FILE)
 
-    # Wrap in DataLoader with batch_size = 1000
+    # Wrap in DataLoader with batch_size = 128
     dataloader = DataLoader(
         dataset,
-        batch_size=1000,
+        batch_size=128,
         shuffle=True,
-        num_workers=4,       # Adjust based on CPU
-        pin_memory=True      # Speeds up GPU transfer
+        num_workers=4,      # Adjust if needed
+        pin_memory=True     # Helps with GPU performance
     )
 
-    # Loop through data (replace this with your model training logic)
+    # Example usage (replace with training loop)
     for i, (embeddings, targets, ids) in enumerate(dataloader):
         print(f"[✓] Loaded batch {i + 1:,} | Shape: {embeddings.shape}")
+        # Model training step would go here
+
        
 
         
