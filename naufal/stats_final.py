@@ -1,68 +1,68 @@
 import os
 import torch
-from esm.models.esm3 import ESM3
-from esm.sdk.api import ESMProtein
-from esm.utils.constants.models import ESM3_OPEN_SMALL
+import math
 
 # === Config ===
-FINAL_EMBEDDINGS_DIR = "/data/archives/naufal/final_embeddings"
-SEQUENCE_SOURCE = "/data/summer2020/naufal/training_data/sequence_dict.pt"  # Assuming you have a preloaded sequence mapping
-OUTPUT_DIR = "/data/summer2020/naufal/esm3_embeddings_new"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+EMBEDDINGS_DIR = "/data/archives/naufal/final_embeddings"
 
-# === Load ESM-3 model ===
-print("[INFO] Loading ESM-3 model...")
-model = ESM3.from_pretrained(ESM3_OPEN_SMALL, device=torch.device("cuda"))
-model.eval().to(torch.float32)
+# === Stats ===
+min_L = float("inf")
+max_L = float("-inf")
+min_D = float("inf")
+max_D = float("-inf")
 
-# === Load sequences from dict (ID -> sequence) ===
-print("[INFO] Loading sequence dictionary...")
-sequence_dict = torch.load(SEQUENCE_SOURCE)  # Assumed to be a dict {id: seq}
+global_min_value = float("inf")
+global_max_value = float("-inf")
 
-# === Get only already-processed protein IDs ===
-print("[INFO] Scanning final_embeddings/ for protein IDs...")
-protein_ids = {
-    fname[:-3] for fname in os.listdir(FINAL_EMBEDDINGS_DIR) if fname.endswith(".pt")
-}
-print(f"[INFO] Found {len(protein_ids)} protein IDs to embed.")
+has_nan = False
+has_inf = False
 
-# === Process embeddings ===
-processed = 0
-skipped = 0
+# === Scan files ===
+print(f"[INFO] Scanning directory: {EMBEDDINGS_DIR}")
+files = [f for f in os.listdir(EMBEDDINGS_DIR) if f.endswith(".pt")]
+print(f"[INFO] Found {len(files)} .pt files")
 
-for pid in sorted(protein_ids):
-    out_path = os.path.join(OUTPUT_DIR, f"{pid}.pt")
-    if os.path.exists(out_path):
-        continue  # Already done
-
-    if pid not in sequence_dict:
-        print(f"[SKIP] No sequence for {pid}")
-        skipped += 1
-        continue
-
-    seq = sequence_dict[pid]
-    if not seq or len(seq) >= 30000:
-        print(f"[SKIP] Invalid or too long: {pid}")
-        skipped += 1
-        continue
-
+for idx, fname in enumerate(files, 1):
+    path = os.path.join(EMBEDDINGS_DIR, fname)
     try:
-        protein = ESMProtein(sequence=seq)
-        protein_tensor = model.encode(protein)
+        tensor = torch.load(path)
+        if not isinstance(tensor, torch.Tensor):
+            print(f"[WARN] Skipped non-tensor file: {fname}")
+            continue
 
-        with torch.no_grad():
-            output = model(sequence_tokens=protein_tensor.sequence[None]).embeddings.detach().cpu()[0]
-            output = torch.nan_to_num(output, nan=0.0, posinf=0.0, neginf=0.0)
-            output = torch.round(output * 1000) / 1000
+        L, D = tensor.shape
+        min_L = min(min_L, L)
+        max_L = max(max_L, L)
+        min_D = min(min_D, D)
+        max_D = max(max_D, D)
 
-        torch.save(output, out_path)
-        processed += 1
+        min_val = tensor.min().item()
+        max_val = tensor.max().item()
 
-        if processed % 100 == 0:
-            print(f"[✓] {processed} proteins embedded...")
+        global_min_value = min(global_min_value, min_val)
+        global_max_value = max(global_max_value, max_val)
+
+        if torch.isnan(tensor).any():
+            has_nan = True
+        if torch.isinf(tensor).any():
+            has_inf = True
+
+        if idx % 10000 == 0:
+            print(f"[✓] Checked {idx} files...")
 
     except Exception as e:
-        print(f"[ERROR] {pid}: {e}")
-        skipped += 1
+        print(f"[ERROR] Failed to load {fname}: {e}")
 
-print(f"\nDone: {processed} embedded | {skipped} skipped")
+# === Report ===
+print("\n====== Summary Report ======")
+print(f"Total files checked: {len(files)}")
+print(f"Min L (length):       {min_L}")
+print(f"Max L (length):       {max_L}")
+print(f"Min D (embedding dim): {min_D}")
+print(f"Max D (embedding dim): {max_D}")
+print(f"Min value in data:     {global_min_value}")
+print(f"Max value in data:     {global_max_value}")
+print(f"Contains NaNs?         {'Yes' if has_nan else 'No'}")
+print(f"Contains Infs?         {'Yes' if has_inf else 'No'}")
+print("================================")
+
