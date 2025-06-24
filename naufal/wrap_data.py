@@ -60,14 +60,13 @@ if __name__ == "__main__":
         dataset,
         batch_size=32,
         shuffle=True,
-        num_workers=4,       # You can increase this if CPU allows
-        pin_memory=True      # Speeds up GPU training
+        num_workers=4,       # Adjust based on CPU
+        pin_memory=True      # Speeds up GPU transfer
     )
 
-    # Peek at the first batch
+    # Loop through data (you can replace this with training logic)
     for i, (embeddings, targets, ids) in enumerate(dataloader):
-        print(f"[✓] Loaded batch {i + 1}")
-        print(f" - Embedding shape: {embeddings.shape}")
-        print(f" - Target shape: {targets.shape}")
-        print(f" - First protein ID: {ids[0]}")
-        break
+        if i == 0 or i % 100 == 0:
+            print(f"[✓] Loaded batch {i + 1}")
+        
+
