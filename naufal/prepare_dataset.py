@@ -47,3 +47,20 @@ class ProteinFunctionDataset(Dataset):
             print(f"[✓] Prepared protein {idx + 1}: {pid} with shape {embedding.shape} and {int(target.sum().item())} GO terms.")
 
         return embedding, target, pid
+
+# === TESTING BLOCK ===
+if __name__ == "__main__":
+    dataset = ProteinFunctionDataset(
+        embedding_dir="/data/archives/naufal/final_embeddings",
+        go_mapping_file="/data/summer2020/naufal/matched_ids_with_go.txt"
+    )
+
+    print(f"[INFO] Total proteins in dataset: {len(dataset)}")
+
+    # Load first example
+    embedding, label, prot_id = dataset[0]
+    print(f"[TEST] First protein ID: {prot_id}")
+    print(f"[TEST] Embedding shape: {embedding.shape}")
+    print(f"[TEST] Number of GO terms: {int(label.sum().item())}")
+    print(f"[TEST] GO term indices: {label.nonzero(as_tuple=True)[0].tolist()}")
+
