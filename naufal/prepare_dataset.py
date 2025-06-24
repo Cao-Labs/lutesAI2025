@@ -11,7 +11,7 @@ class ProteinFunctionDataset(Dataset):
         # Step 1: Scan .pt embedding files
         print("[INFO] Scanning embedding files...")
         self.ids = [fname[:-3] for fname in os.listdir(embedding_dir) if fname.endswith(".pt")]
-        print(f"[INFO] Found {len(self.ids)} embedding files.")
+        print(f"[INFO] Found {len(self.ids):,} embedding files.")
 
         # Step 2: Build GO label dictionary for relevant IDs
         self.go_labels = defaultdict(list)
@@ -44,7 +44,7 @@ class ProteinFunctionDataset(Dataset):
                 target[self.go_vocab[term]] = 1.0
 
         if idx == 0 or idx % 10000 == 0:
-            print(f"[✓] Prepared protein {idx + 1}: {pid} with shape {embedding.shape} and {int(target.sum().item())} GO terms.")
+            print(f"[✓] Processed protein {idx + 1:,}: {pid} | shape: {embedding.shape} | GO terms: {int(target.sum().item())}")
 
         return embedding, target, pid
 
@@ -55,12 +55,9 @@ if __name__ == "__main__":
         go_mapping_file="/data/summer2020/naufal/matched_ids_with_go.txt"
     )
 
-    print(f"[INFO] Total proteins in dataset: {len(dataset)}")
+    print(f"[INFO] Total proteins in dataset: {len(dataset):,}")
 
-    # Load first example
+    # Load first example (to trigger __getitem__)
     embedding, label, prot_id = dataset[0]
-    print(f"[TEST] First protein ID: {prot_id}")
-    print(f"[TEST] Embedding shape: {embedding.shape}")
-    print(f"[TEST] Number of GO terms: {int(label.sum().item())}")
-    print(f"[TEST] GO term indices: {label.nonzero(as_tuple=True)[0].tolist()}")
+
 
