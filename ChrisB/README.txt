@@ -8,6 +8,18 @@ If you plan to use this work beyond academic research, please ensure compliance 
 
 # 🧬 Protein Function Description with ESM-3 + BLIP-2
 
+Every cell in your body is packed with proteins — complex molecules that control everything from metabolism to immunity. But for all their importance, we still don’t know what most proteins actually do. That’s because figuring out a protein’s function usually requires expensive lab experiments or time-consuming structural analysis.
+
+What if we could skip that? What if we could look at a protein — not under a microscope, but as an image — and ask an AI to tell us what it might do?
+
+That’s exactly what we’re building.
+We start with the raw protein sequence and feed it into a powerful AI from Meta called ESM-3, which turns the sequence into a high-dimensional vector — a kind of fingerprint of the protein. From there, we reshape this data into a 2D image — a visual representation of the protein’s hidden patterns.
+
+Then comes the twist: instead of using a biology tool, we hand this image to BLIP‑2, a vision-language model originally trained on real-world photographs. It looks at the protein image and tries to describe what it sees — in plain English.
+
+We’re still refining the output, but if successful, this approach could let us predict protein function without touching a microscope — just using sequence data and AI.
+It’s a bridge between biology and computer vision that opens the door to faster, scalable, and more interpretable protein discovery.
+
 <!--
 This project uses Meta AI’s ESM-3 to generate embeddings from protein sequences, visualizes them as 2D images, and applies Salesforce’s BLIP-2 (via LAVIS) to produce natural-language function descriptions. These captions are then compared to GO or UniProt reference descriptions using SentenceTransformer cosine similarity.
 -->
