@@ -58,6 +58,12 @@ for fname in os.listdir(EMBEDDINGS_DIR):
         continue
 
     prot_id = fname[:-3]
+    output_path = os.path.join(OUTPUT_DIR, f"{prot_id}.pt")
+
+    # === Skip if already processed ===
+    if os.path.exists(output_path):
+        continue
+
     pt_path = os.path.join(EMBEDDINGS_DIR, fname)
 
     try:
@@ -92,7 +98,7 @@ for fname in os.listdir(EMBEDDINGS_DIR):
         diff[diff == 0] = 1.0
         combined = (combined - min_vals) / diff
 
-        torch.save(combined, os.path.join(OUTPUT_DIR, f"{prot_id}.pt"))
+        torch.save(combined, output_path)
         processed += 1
 
         if processed == 1:
@@ -105,8 +111,4 @@ for fname in os.listdir(EMBEDDINGS_DIR):
         print(f"[Error] Skipped {prot_id}: {str(e)}")
         continue
 
-print(f"\nDONE: {processed} processed | {skipped} skipped")
-
-
-
-
+print(f"\nDONE: {processed} newly processed | {skipped} skipped due to issues")

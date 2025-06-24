@@ -2,7 +2,7 @@ import os
 import torch
 
 # Paths and constants
-EMBEDDINGS_DIR = "/data/summer2020/naufal/esm3_embeddings"
+EMBEDDINGS_DIR = "/data/summer2020/naufal/esm3_embeddings_new"
 expected_D = 1536
 
 min_val = float("inf")
