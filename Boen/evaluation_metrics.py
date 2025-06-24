@@ -42,7 +42,7 @@ def load_predictions(predictions_file):
 
 def main():
     """Main evaluation function to produce a single, combined result file."""
-    OBO_FILE_PATH = "/data/shared/go/gene_ontology.obo"
+    OBO_FILE_PATH = "/data/shared/databases/UniProt2025/GO_June_1_2025.obo"
     GROUND_TRUTH_FILE = "/data/summer2020/Boen/ground_truth_go_terms/consolidated_ground_truth.tsv"
     PREDICTIONS_FILE = "/data/summer2020/Boen/hifun_predictions/predictions_for_eval.txt"
     OUTPUT_DIR = "/data/summer2020/Boen/final_evaluation_results"
