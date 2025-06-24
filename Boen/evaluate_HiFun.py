@@ -3,10 +3,9 @@
 Custom HiFun prediction script for protein function prediction
 Modified to run on specific FASTA file and output to specified directory.
 
-*** Update: This version now deletes and recreates the output directory
-*** to ensure it is clean before saving new predictions.
-*** It also generates a second output file ('predictions_for_eval.txt')
-*** formatted specifically for evaluation scripts like GOAnalysis_similarityMax.py.
+*** CORRECTION: This version saves ALL predictions to the evaluation file,
+*** without any pre-filtering, to ensure the evaluation script has
+*** complete data and can calculate recall correctly.
 """
 import os
 import sys
@@ -69,12 +68,8 @@ def predict_protein_functions():
         # Load pre-built models and data
         logger.info("Loading model components...")
         
-        # Check for required files
         required_files = [
-            'db/goterms_level34.pkl',
-            'db/word_index.npy',
-            'models/hifun_mode.h5',
-            'db/embeddings_matrix.npy'
+            'db/goterms_level34.pkl', 'db/word_index.npy', 'models/hifun_mode.h5'
         ]
         
         for file_path in required_files:
@@ -102,68 +97,25 @@ def predict_protein_functions():
         # Make predictions
         predict_probs = model.predict([word2vec_mat, blosum_mat], verbose=1)
         
-        # --- MODIFICATION: Save results in the "long" format for the evaluation script ---
+        # --- Save results in the "long" format for the evaluation script ---
         eval_output_file = os.path.join(output_dir, 'predictions_for_eval.txt')
-        logger.info(f"Saving predictions in evaluation format to: {eval_output_file}")
+        logger.info(f"Saving ALL predictions in evaluation format to: {eval_output_file}")
         
         with open(eval_output_file, 'w') as f:
-            # Write header and footer for compatibility with CAFA-style evaluators
-            f.write("AUTHOR G_Gemini\n")
-            f.write("MODEL 1\n")
-            f.write("KEYWORDS deep learning\n")
-
+            f.write("AUTHOR G_Gemini\nMODEL 1\nKEYWORDS deep learning\n")
             # Iterate through each protein and its prediction scores
             for i, prot_id in enumerate(protein_id):
                 probs = predict_probs[i]
                 for j, go_term in enumerate(label_index['terms']):
                     score = probs[j]
-                    # Only write predictions with a score > 0.01 to keep the file size reasonable
-                    if score > 0.01:
-                        f.write(f"{prot_id}\t{go_term}\t{score:.5f}\n")
-            
+                    # --- FIX ---
+                    # Write ALL predictions, no matter how low the score.
+                    # The evaluation script will handle the thresholding.
+                    f.write(f"{prot_id}\t{go_term}\t{score:.5f}\n")
             f.write("END\n")
 
         logger.info("Evaluation format file saved.")
 
-        # --- KEEPING ORIGINAL FORMAT FOR HUMAN READABILITY ---
-        logger.info("Saving results in human-readable wide format...")
-        # Process predictions with a display threshold
-        threshold = 0.20
-        predict_terms = []
-        for prob in predict_probs:
-            ind = np.argwhere(prob >= threshold).flatten().tolist()
-            if len(ind) > 0:
-                predict_terms.append(';'.join(label_index.iloc[ind, 0].to_list()))
-            else:
-                predict_terms.append('')
-        
-        # Create a simpler results dataframe for easy viewing
-        predict_res_summary = pd.DataFrame({
-            'Protein_id': protein_id,
-            f'GO_terms_above_{threshold}': predict_terms
-        })
-        
-        # Add all probability scores to the dataframe
-        prob_df = pd.DataFrame(predict_probs, columns=label_index['terms'])
-        predict_res_full = pd.concat([predict_res_summary, prob_df], axis=1)
-        
-        # Save wide-format results
-        output_file_wide = os.path.join(output_dir, 'hifun_predictions_wide.csv')
-        predict_res_full.to_csv(output_file_wide, index=False)
-        logger.info(f"Human-readable predictions saved to: {output_file_wide}")
-
-        # Save a summary file as well
-        summary_file = os.path.join(output_dir, 'prediction_summary.txt')
-        with open(summary_file, 'w') as f:
-            f.write(f"HiFun Protein Function Prediction Results\n")
-            f.write(f"=========================================\n\n")
-            f.write(f"Input file: {input_fasta}\n")
-            f.write(f"Number of proteins processed: {len(protein_id)}\n")
-            f.write(f"Evaluation format output file: {eval_output_file}\n")
-            f.write(f"Human-readable (wide) output file: {output_file_wide}\n")
-        
-        logger.info(f"Summary saved to: {summary_file}")
-        
     except Exception as e:
         logger.error(f"Error during prediction: {str(e)}")
         raise
