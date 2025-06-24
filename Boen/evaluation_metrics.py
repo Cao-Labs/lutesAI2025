@@ -1,6 +1,6 @@
 import sys
 import os
-from GeneOntologyTree import GeneOntologyTree # Import the professor's class
+from GeneOntologyTree import GeneOntologyTree
 
 def load_ground_truth(ground_truth_file):
     """Loads the ground truth file into a dictionary."""
@@ -11,8 +11,7 @@ def load_ground_truth(ground_truth_file):
             next(f)  # Skip header
             for line in f:
                 parts = line.strip().split('\t')
-                if len(parts) < 2 or parts[1] == 'NOT_FOUND':
-                    continue
+                if len(parts) < 2 or parts[1] == 'NOT_FOUND': continue
                 protein_id, go_terms_str = parts[0], parts[1]
                 ground_truth[protein_id] = set(go_terms_str.split(';'))
     except FileNotFoundError:
@@ -28,9 +27,7 @@ def load_predictions(predictions_file):
     try:
         with open(predictions_file, 'r') as f:
             for line in f:
-                if line.startswith("AUTHOR") or line.startswith("MODEL") or \
-                   line.startswith("KEYWORDS") or line.startswith("END"):
-                    continue
+                if line.startswith(("AUTHOR", "MODEL", "KEYWORDS", "END")): continue
                 parts = line.strip().split('\t')
                 if len(parts) < 3: continue
                 protein_id, go_term, score = parts[0], parts[1], float(parts[2])
@@ -43,88 +40,75 @@ def load_predictions(predictions_file):
     print(f"Loaded predictions for {len(predictions)} proteins.")
     return predictions
 
-def run_evaluation_for_category(category_name, go_tree, truth_data, pred_data, output_file):
-    """Runs the full evaluation for a single GO category (BP, CC, or MF)."""
-
-    print(f"\n--- Evaluating Category: {category_name} ---")
-    
-    # Map from full name to the abbreviation used in the OBO file
-    namespace_map = {
-        "BP": "biological_process",
-        "CC": "cellular_component",
-        "MF": "molecular_function"
-    }
-    namespace = namespace_map[category_name]
-
-    results = []
-    for i in range(101):
-        threshold = i / 100.0
-        
-        sum_precision = 0.0
-        sum_recall = 0.0
-        protein_count = 0
-        
-        for protein_id, all_true_terms in truth_data.items():
-            # Filter the true and predicted terms to only include the current category
-            true_set = {go for go in all_true_terms if go_tree.GetGONameSpace(go) == namespace}
-            
-            # If there are no true terms in this category for this protein, skip it
-            if not true_set:
-                continue
-
-            protein_count += 1
-            predicted_set = set()
-            if protein_id in pred_data:
-                predicted_set = {go for go, score in pred_data[protein_id] 
-                                 if score >= threshold and go_tree.GetGONameSpace(go) == namespace}
-            
-            precision, recall = go_tree.GOSetsPropagate(predicted_set, true_set)
-            
-            sum_precision += precision
-            sum_recall += recall
-
-        avg_precision = sum_precision / protein_count if protein_count > 0 else 0.0
-        avg_recall = sum_recall / protein_count if protein_count > 0 else 0.0
-        f1_score = 2 * (avg_precision * avg_recall) / (avg_precision + avg_recall) if (avg_precision + avg_recall) > 0 else 0.0
-
-        results.append((threshold, avg_precision, avg_recall, f1_score))
-        if i % 10 == 0: # Print progress
-             print(f"Threshold: {threshold:.2f}, Precision: {avg_precision:.4f}, Recall: {avg_recall:.4f}, F1-Score: {f1_score:.4f}")
-
-    # Save results for this category
-    with open(output_file, 'w') as fout:
-        fout.write("Threshold\tPropagated_Precision\tPropagated_Recall\tF1-Score\n")
-        for res in results:
-            fout.write(f"{res[0]:.2f}\t{res[1]:.4f}\t{res[2]:.4f}\t{res[3]:.4f}\n")
-    print(f"Results for {category_name} saved to: {output_file}")
-
-
 def main():
-    """
-    Main function to run the semantic evaluation using term propagation.
-    """
-    # --- Hardcoded file paths ---
-    OBO_FILE_PATH = "/data/shared/databases/UniProt2025/GO_June_1_2025.obo" 
-    
+    """Main evaluation function to produce a single, combined result file."""
+    OBO_FILE_PATH = "/data/shared/go/gene_ontology.obo"
     GROUND_TRUTH_FILE = "/data/summer2020/Boen/ground_truth_go_terms/consolidated_ground_truth.tsv"
     PREDICTIONS_FILE = "/data/summer2020/Boen/hifun_predictions/predictions_for_eval.txt"
-    OUTPUT_DIR = "/data/summer2020/Boen/hifun_predictions"
+    OUTPUT_DIR = "/data/summer2020/Boen/final_evaluation_results"
+    OUTPUT_FILE = os.path.join(OUTPUT_DIR, "evaluation_results.tsv")
 
-    print("--- Starting Evaluation with Term Propagation (By Category) ---")
-    
+    print("--- Starting Final Combined Evaluation ---")
+    if not os.path.exists(OUTPUT_DIR):
+        os.makedirs(OUTPUT_DIR)
+
     # 1. Initialize the Gene Ontology Tree
     go_tree = GeneOntologyTree(OBO_FILE_PATH, TestMode=0)
 
-    # 2. Load all data once
+    # 2. Load Ground Truth and Predictions
     truth_data = load_ground_truth(GROUND_TRUTH_FILE)
     pred_data = load_predictions(PREDICTIONS_FILE)
 
-    # 3. Run evaluation for each category
-    for category in ["BP", "CC", "MF"]:
-        output_file_for_category = os.path.join(OUTPUT_DIR, f"hifun_propagation_eval_{category}.tsv")
-        run_evaluation_for_category(category, go_tree, truth_data, pred_data, output_file_for_category)
+    # 3. Setup result storage
+    results = []
+
+    # 4. Main evaluation loop
+    print("\nStarting threshold-based evaluation...")
+    for i in range(101):
+        thres = i / 100.0
         
-    print("\n--- All evaluations complete. ---")
+        total_precision = 0.0
+        total_recall = 0.0
+        protein_count = 0
+        
+        # Iterate over every protein that has a ground truth entry
+        for protein_id, true_terms in truth_data.items():
+            # We only evaluate proteins that have at least one ground truth term
+            if not true_terms:
+                continue
+
+            protein_count += 1
+            
+            # Get the predictions for this protein (if they exist)
+            pred_tuples = pred_data.get(protein_id, [])
+            
+            # Filter predictions based on the current threshold
+            predicted_terms = {go for go, score in pred_tuples if score >= thres}
+
+            # Calculate precision and recall using the propagation method
+            precision, recall = go_tree.GOSetsPropagate(predicted_terms, true_terms)
+            
+            total_precision += precision
+            total_recall += recall
+            
+        # Calculate Averages for this threshold
+        avg_precision = total_precision / protein_count if protein_count > 0 else 0.0
+        avg_recall = total_recall / protein_count if protein_count > 0 else 0.0
+        f1_score = 2 * (avg_precision * avg_recall) / (avg_precision + avg_recall) if (avg_precision + avg_recall) > 0 else 0.0
+        
+        results.append((thres, avg_precision, avg_recall, f1_score))
+
+        if i % 10 == 0:
+            print(f"Processed Threshold: {thres:.2f} | Avg Precision: {avg_precision:.4f} | Avg Recall: {avg_recall:.4f}")
+
+    # 5. Write the final results to a single file
+    print(f"\nWriting final result file to {OUTPUT_FILE}...")
+    with open(OUTPUT_FILE, 'w') as f:
+        f.write("Threshold\tPrecision\tRecall\tF1-Score\n")
+        for res in results:
+            f.write(f"{res[0]:.2f}\t{res[1]:.4f}\t{res[2]:.4f}\t{res[3]:.4f}\n")
+
+    print(f"Evaluation complete. Results saved in {OUTPUT_FILE}")
 
 if __name__ == "__main__":
     main()

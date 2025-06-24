@@ -19,81 +19,17 @@ class GeneOntologyTree:
     def PrintMessage(self,Mess):
         if self.TestMode == 1:
             print(Mess)
-
-    def GOSimilarity(self, GO1, GO2):
-        self.PrintMessage("Now compute the similarity of two GO terms sets based on GO tree. We may need to DFS to get the path from GO to the root.")
-        if GO1 not in self.GOSpace or GO2 not in self.GOSpace:
-            return -1
-
-        if self.GOSpace[GO1] != self.GOSpace[GO2]:
-            return 0
-
-        Longest2Share = 0
-        CommonStep = 0
-        Level1, Sets1 = [GO1], {GO1: 1}
-        Level2, Sets2 = [GO2], {GO2: 1}
-        StartingLevel = None
-
-        while True:
-            tag = 0
-            for eachGO in Level1:
-                if eachGO in Sets2:
-                    StartingLevel = Level1
-                    tag = 1
-            if tag == 1: break
-            for eachGO in Level2:
-                if eachGO in Sets1:
-                    StartingLevel = Level2
-                    tag = 1
-            if tag == 1: break
-            Longest2Share+=1
-            
-            temLevel = []
-            for eachGO in Level1:
-                if (eachGO != self.MFroot) and (eachGO != self.BProot) and (eachGO != self.CCroot) and (eachGO in self.GOParent):
-                    for tGO in self.GOParent[eachGO]:
-                        temLevel.append(tGO)
-                        Sets1[tGO] = 1
-            Level1 = temLevel
-
-            temLevel = []
-            for eachGO in Level2:
-                if (eachGO != self.MFroot) and (eachGO != self.BProot) and (eachGO != self.CCroot) and (eachGO in self.GOParent):
-                    for tGO in self.GOParent[eachGO]:
-                        temLevel.append(tGO)
-                        Sets2[tGO] = 1
-            Level2 = temLevel
-
-            if not Level1 or not Level2:
-                return 1.0 / (Longest2Share + 1.0)
-
-        while True:
-            CommonStep+=1
-            temLevel = []
-            for eachGO in StartingLevel:
-                if (eachGO != self.MFroot) and (eachGO != self.BProot) and (eachGO != self.CCroot) and (eachGO in self.GOParent):
-                    for tGO in self.GOParent[eachGO]:
-                        temLevel.append(tGO)
-            StartingLevel = temLevel
-            if not StartingLevel: break
-
-        return float(CommonStep) / (CommonStep + Longest2Share)
-
-    def MaxSimilarity(self, PredictionSet = [], TrueSet = []):
-        maxSim = 0.0
-        for preGO in PredictionSet:
-            for tGO in TrueSet:
-                temSim = self.GOSimilarity(preGO,tGO)
-                if temSim > maxSim:
-                    maxSim = temSim
-        return maxSim
         
     def GetGONameSpace(self, GO):
         return self.GOSpace.get(GO)
 
     def GOSetsPropagate(self, PredictionSet, TrueSet):
-        if not PredictionSet or not TrueSet:
-            return (0,0)
+        if not PredictionSet and not TrueSet:
+             return (1.0, 1.0)
+        if not TrueSet:
+             return (0.0, 1.0)
+        if not PredictionSet:
+             return (1.0, 0.0)
         
         NewPre = {}
         for each in PredictionSet:
@@ -126,8 +62,12 @@ class GeneOntologyTree:
         return proGOs
 
     def _CalPrecisionRecall(self,NewPre,NewTrue):
-        if not NewPre or not NewTrue:
-            return (0.0, 0.0) if not NewTrue else (1.0 if not NewPre else 0.0, 0.0)
+        if not NewPre and not NewTrue:
+            return (1.0, 1.0)
+        if not NewPre:
+            return (1.0, 0.0)
+        if not NewTrue:
+            return (0.0, 1.0)
             
         TP = float(len(set(NewPre.keys()) & set(NewTrue.keys())))
         FP = float(len(set(NewPre.keys()) - set(NewTrue.keys())))
@@ -157,9 +97,11 @@ class GeneOntologyTree:
                         preGO, parents, NameSpace = "NULL", [], None
                     elif tem[0] == "namespace:":
                         NameSpace = tem[1]
+                # --- BUG FIX ---
                 if preGO!="NULL":
                     self.GOParent[preGO] = parents
-                    if NameSpace: self.GOSpace[preGO] = NameSpace
+                    if NameSpace: 
+                        self.GOSpace[preGO] = NameSpace
         except FileNotFoundError:
             print(f"FATAL ERROR: The Gene Ontology OBO file was not found at '{pathOfGOTree}'")
             print("Please check the path and try again.")
