@@ -55,18 +55,19 @@ if __name__ == "__main__":
     # Create the dataset
     dataset = ProteinFunctionDataset(EMBEDDING_DIR, GO_MAPPING_FILE)
 
-    # Wrap in DataLoader
+    # Wrap in DataLoader with batch_size = 1000
     dataloader = DataLoader(
         dataset,
-        batch_size=32,
+        batch_size=1000,
         shuffle=True,
         num_workers=4,       # Adjust based on CPU
         pin_memory=True      # Speeds up GPU transfer
     )
 
-    # Loop through data (you can replace this with training logic)
+    # Loop through data (replace this with your model training logic)
     for i, (embeddings, targets, ids) in enumerate(dataloader):
-        if i == 0 or i % 100 == 0:
-            print(f"[✓] Loaded batch {i + 1}")
+        print(f"[✓] Loaded batch {i + 1:,} | Shape: {embeddings.shape}")
+       
+
         
 
