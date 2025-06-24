@@ -8,9 +8,9 @@ class ProteinFunctionDataset(Dataset):
         self.embedding_dir = embedding_dir
         self.go_mapping_file = go_mapping_file
 
-        # Step 1: Scan .pt embedding files
+        # Step 1: Scan .pt embedding files (use a set for fast lookup)
         print("[INFO] Scanning embedding files...")
-        self.ids = [fname[:-3] for fname in os.listdir(embedding_dir) if fname.endswith(".pt")]
+        self.ids = set(fname[:-3] for fname in os.listdir(embedding_dir) if fname.endswith(".pt"))
         print(f"[INFO] Found {len(self.ids):,} embedding files.")
 
         # Step 2: Build GO label dictionary for relevant IDs
@@ -30,6 +30,9 @@ class ProteinFunctionDataset(Dataset):
         self.go_vocab = {go_term: idx for idx, go_term in enumerate(sorted(go_terms_set))}
         self.num_labels = len(self.go_vocab)
         print(f"[INFO] Constructed GO vocabulary with {self.num_labels} terms.")
+
+        # Convert set of ids back to list for indexing
+        self.ids = list(self.ids)
 
     def __len__(self):
         return len(self.ids)
