@@ -46,8 +46,7 @@ class ProteinFunctionDataset(Dataset):
             if term in self.go_vocab:
                 target[self.go_vocab[term]] = 1.0
 
-        if idx == 0 or idx % 10000 == 0:
-            print(f"[✓] Processed protein {idx + 1:,}: {pid} | shape: {embedding.shape} | GO terms: {int(target.sum().item())}")
+        print(f"[✓] Processed protein {idx + 1:,}: {pid} | shape: {embedding.shape} | GO terms: {int(target.sum().item())}")
 
         return embedding, target, pid
 
@@ -61,7 +60,7 @@ if __name__ == "__main__":
 
     print(f"[INFO] Total proteins in dataset: {len(dataset):,}")
 
-    # Iterate to trigger progress printing for every 10,000
+    # Iterate to trigger progress printing for every protein
     for idx in range(len(dataset)):
         _ = dataset[idx]
 
