@@ -51,6 +51,7 @@ class ProteinFunctionDataset(Dataset):
 
         return embedding, target, pid
 
+
 # === TESTING BLOCK ===
 if __name__ == "__main__":
     dataset = ProteinFunctionDataset(
@@ -60,7 +61,7 @@ if __name__ == "__main__":
 
     print(f"[INFO] Total proteins in dataset: {len(dataset):,}")
 
-    # Load first example (to trigger __getitem__)
-    embedding, label, prot_id = dataset[0]
-
+    # Iterate to trigger progress printing for every 10,000
+    for idx in range(len(dataset)):
+        _ = dataset[idx]
 
