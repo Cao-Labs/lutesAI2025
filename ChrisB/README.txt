@@ -23,16 +23,8 @@ pip install matplotlib pillow transformers sentence-transformers esm
 
 ## 🚀 How to Run
 
-1. Add your protein sequences to a FASTA file called `your_sequences.fasta` in this format:
 
-```
->seq1
-MASTSEQ...
->seq2
-VPLAASEQ...
-```
-
-2. Run `esm3_batch_embedder.py` to extract embeddings from the sequences:
+1. Run `esm3_batch_embedder.py` to extract embeddings from the sequences:
 
 ```bash
 python esm3_batch_embedder.py
@@ -40,19 +32,19 @@ python esm3_batch_embedder.py
 
 This will save `.pt` embedding files to a directory like `esm3_embeddings`.
 
-3. Run `generate_protein_image.py` to convert a sequence to an image:
+2. Run `generate_protein_image.py` to convert a sequence to an image:
 
 ```bash
 python generate_protein_image.py --sequence "MASTSEQ..." --out protein_image.png
 ```
 
-4. Run `run_blip2.py` to generate a protein function caption from the image:
+3. Run `run_blip2.py` to generate a protein function caption from the image:
 
 ```bash
 python run_blip2.py
 ```
 
-5. Provide a reference description from GO or UniProt and compare them using `eval_similarity.py`:
+4. Provide a reference description from GO or UniProt and compare them using `eval_similarity.py`:
 
 ```bash
 python eval_similarity.py
@@ -64,14 +56,13 @@ Edit `eval_similarity.py` to include your descriptions or modify it for batch pr
 
 | Step | Description                                             | Script/File                 | Status |
 |------|---------------------------------------------------------|-----------------------------|--------|
-| 1    | Input raw sequence (FASTA)                              | `your_sequences.fasta`      | ✅     |
-| 2    | Generate ESM-3 embeddings                               | `esm3_batch_embedder.py`    | ✅     |
-| 3    | Convert embeddings to 2D matrix                         | `generate_protein_image.py` | ✅     |
-| 4    | Normalize and save as image                             | `generate_protein_image.py` | ✅     |
-| 5    | Generate image caption with BLIP-2                      | `run_blip2.py`              | ✅     |
-| 6    | Prepare GO/UniProt reference descriptions               | (manual/external)           | ✅     |
-| 7    | Measure similarity (cosine distance via transformer)    | `dif_description.py`        | ✅     |
-| 8    | Evaluate and output similarity score                    | `eval_similarity.py`        | ✅     |
+| 1    | Generate ESM-3 embeddings                               | `esm3_embeddings.py`        | ✅     |
+| 2    | Convert embeddings to 2D matrix                         | `generate_protein_image.py` | ✅     |
+| 3    | Normalize and save as image                             | `generate_protein_image.py` | ✅     |
+| 4    | Generate image caption with BLIP-2                      | `run_blip2.py`              | ✅     |
+| 5    | Prepare GO/UniProt reference descriptions               | (manual/external)           | ✅     |
+| 6    | Measure similarity (cosine distance via transformer)    | `dif_description.py`        | ✅     |
+| 7    | Evaluate and output similarity score                    | `eval_similarity.py`        | ✅     |
 
 ## 📁 Project Files
 
@@ -89,3 +80,11 @@ Edit `eval_similarity.py` to include your descriptions or modify it for batch pr
 - Captions are generated from visualized embeddings (no structure or text input)
 - Reference descriptions must be provided manually or queried from databases
 -->
+## ⚠️ License and Usage Notice
+
+This project uses Meta AI’s ESM-3 model for protein embedding generation **strictly for academic and non-commercial research purposes**.
+
+Please be aware that the ESM-3 model and weights may have licensing restrictions that limit commercial use and redistribution. Users should consult the official Meta ESM repository for detailed license terms: https://github.com/facebookresearch/esm
+
+If you plan to use this work beyond academic research, please ensure compliance with all licensing and usage terms.
+
