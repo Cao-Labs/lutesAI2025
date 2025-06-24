@@ -1,3 +1,11 @@
+## ⚠️ License and Usage Notice
+
+This project uses Meta AI’s ESM-3 model for protein embedding generation **strictly for academic and non-commercial research purposes**.
+
+Please be aware that the ESM-3 model and weights may have licensing restrictions that limit commercial use and redistribution. Users should consult the official Meta ESM repository for detailed license terms: https://github.com/facebookresearch/esm
+
+If you plan to use this work beyond academic research, please ensure compliance with all licensing and usage terms.
+
 # 🧬 Protein Function Description with ESM-3 + BLIP-2
 
 <!--
@@ -80,11 +88,5 @@ Edit `eval_similarity.py` to include your descriptions or modify it for batch pr
 - Captions are generated from visualized embeddings (no structure or text input)
 - Reference descriptions must be provided manually or queried from databases
 -->
-## ⚠️ License and Usage Notice
 
-This project uses Meta AI’s ESM-3 model for protein embedding generation **strictly for academic and non-commercial research purposes**.
-
-Please be aware that the ESM-3 model and weights may have licensing restrictions that limit commercial use and redistribution. Users should consult the official Meta ESM repository for detailed license terms: https://github.com/facebookresearch/esm
-
-If you plan to use this work beyond academic research, please ensure compliance with all licensing and usage terms.
 
