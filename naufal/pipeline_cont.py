@@ -1,11 +1,10 @@
 import os
 import torch
-import numpy as np
 
 # === Config ===
 EMBEDDINGS_DIR = "/data/summer2020/naufal/esm3_embeddings_new"
 FEATURES_FILE = "/data/summer2020/naufal/features_dssp_direct.txt"
-OUTPUT_DIR = "/data/summer2020/naufal/final_embeddings_npy"
+OUTPUT_DIR = "/data/archives/naufal/final_embeddings"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 L_FIXED = 1913
@@ -59,6 +58,12 @@ for fname in os.listdir(EMBEDDINGS_DIR):
         continue
 
     prot_id = fname[:-3]
+    output_path = os.path.join(OUTPUT_DIR, f"{prot_id}.pt")
+
+    # === Skip if already processed ===
+    if os.path.exists(output_path):
+        continue
+
     pt_path = os.path.join(EMBEDDINGS_DIR, fname)
 
     try:
@@ -93,11 +98,9 @@ for fname in os.listdir(EMBEDDINGS_DIR):
         diff[diff == 0] = 1.0
         combined = (combined - min_vals) / diff
 
-        # Save as .npy
-        out_path = os.path.join(OUTPUT_DIR, f"{prot_id}.npy")
-        np.save(out_path, combined.numpy())
-
+        torch.save(combined, output_path)
         processed += 1
+
         if processed == 1:
             print(f"[✓] First protein written: {prot_id}")
         elif processed % 10000 == 0:
@@ -108,4 +111,4 @@ for fname in os.listdir(EMBEDDINGS_DIR):
         print(f"[Error] Skipped {prot_id}: {str(e)}")
         continue
 
-print(f"\nDONE: {processed} processed | {skipped} skipped")
+print(f"\nDONE: {processed} newly processed | {skipped} skipped due to issues")
