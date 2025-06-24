@@ -47,7 +47,7 @@ pip install matplotlib pillow transformers sentence-transformers esm
 1. Run `esm3_batch_embedder.py` to extract embeddings from the sequences:
 
 ```bash
-python esm3_batch_embedder.py
+python esm3_embeddings.py
 ```
 
 This will save `.pt` embedding files to a directory like `esm3_embeddings`.
@@ -80,13 +80,13 @@ Edit `eval_similarity.py` to include your descriptions or modify it for batch pr
 | 2    | Convert embeddings to 2D matrix                         | `generate_protein_image.py` | ✅     |
 | 3    | Normalize and save as image                             | `generate_protein_image.py` | ✅     |
 | 4    | Generate image caption with BLIP-2                      | `run_blip2.py`              | ✅     |
-| 5    | Prepare GO/UniProt reference descriptions               | (manual/external)           | ✅     |
+| 5    | Prepare GO/UniProt reference descriptions               | `eval_similarity.py`        | ✅     |
 | 6    | Measure similarity (cosine distance via transformer)    | `dif_description.py`        | ✅     |
 | 7    | Evaluate and output similarity score                    | `eval_similarity.py`        | ✅     |
 
 ## 📁 Project Files
 
-- `esm3_batch_embedder.py` → Extracts embeddings from protein sequences
+- `esm3_embeddings.py` → Extracts embeddings from protein sequences
 - `generate_protein_image.py` → Converts embeddings to normalized 2D matrices as `.png`
 - `run_blip2.py` → Runs BLIP-2 to generate natural language captions from protein images
 - `dif_description.py` → Contains `similarity_score()` using SentenceTransformer
