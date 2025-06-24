@@ -2,7 +2,7 @@ import os
 from dif_description import similarity_score
 from sentence_transformers import SentenceTransformer, util
 
-# Load model once
+# Load model once  
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
 # --- Step 1: Parse GO .obo file ---
