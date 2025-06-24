@@ -31,7 +31,7 @@ def predict_protein_functions():
     Run HiFun predictions on testing_sequences.fasta
     """
     # File paths
-    input_fasta = '/data/summer2020/naufal/testing_sequences.fasta'
+    input_fasta = '/data/summer2020/Boen/benchmark_testing_sequences.fasta'
     output_dir = '/data/summer2020/Boen/hifun_predictions'
     hifun_dir = '/data/shared/tools/HiFun'
     
