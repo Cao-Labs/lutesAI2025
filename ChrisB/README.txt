@@ -8,6 +8,7 @@ If you plan to use this work beyond academic research, please ensure compliance 
 
 # 🧬 Protein Function Description with ESM-3 + BLIP-2
 
+Intro
 Every cell in your body is packed with proteins — complex molecules that control everything from metabolism to immunity. But for all their importance, we still don’t know what most proteins actually do. That’s because figuring out a protein’s function usually requires expensive lab experiments or time-consuming structural analysis.
 
 What if we could skip that? What if we could look at a protein — not under a microscope, but as an image — and ask an AI to tell us what it might do?
@@ -100,5 +101,15 @@ Edit `eval_similarity.py` to include your descriptions or modify it for batch pr
 - Captions are generated from visualized embeddings (no structure or text input)
 - Reference descriptions must be provided manually or queried from databases
 -->
+
+## 👤 Author
+
+Created by **Christopher Barker**   
+Pacific Lutheran University  
+GitHub: [@ChristopherDSBarker](https://github.com/ChristopherDSBarker)  
+Email: Christopher.Barker@plu.edu
+
+
+
 
 
