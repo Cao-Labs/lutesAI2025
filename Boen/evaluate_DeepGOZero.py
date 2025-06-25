@@ -16,7 +16,7 @@ import multiprocessing
 FASTA_FILE = "/data/summer2020/Boen/benchmark_testing_sequences.fasta"
 
 # 2. Path to the main InterProScan executable shell script
-INTERPROSCAN_PATH = "/data/shared/tools/interproscan-5.75-106.0/interproscan.sh"
+INTERPROSCAN_PATH = "/home/lutesAI2025/tools/interproscan-5.75-106.0/interproscan.sh"
 
 # 3. Path to the cloned DeepGOZero repository
 DEEPGOZERO_PATH = "/data/shared/tools/deepgozero"
@@ -42,6 +42,33 @@ def update_status(message):
     with open(STATUS_FILE, "a") as f:
         f.write(f"{now} - {message}\n")
     print(message)
+
+def filter_long_sequences(input_fasta, output_dir, max_length=5000):
+    """
+    Filters a FASTA file to remove sequences longer than a specified limit.
+    This prevents InterProScan from failing on exceptionally long proteins.
+    """
+    filtered_fasta_path = os.path.join(output_dir, "filtered_sequences.fasta")
+    update_status(f"STEP 0: Filtering sequences longer than {max_length} aa from {input_fasta}...")
+    
+    short_sequences = []
+    long_sequence_count = 0
+    total_count = 0
+
+    for record in SeqIO.parse(input_fasta, "fasta"):
+        total_count += 1
+        if len(record.seq) <= max_length:
+            short_sequences.append(record)
+        else:
+            long_sequence_count += 1
+            
+    SeqIO.write(short_sequences, filtered_fasta_path, "fasta")
+    
+    if long_sequence_count > 0:
+        update_status(f"STEP 0: Removed {long_sequence_count} sequences longer than {max_length} aa.")
+    update_status(f"STEP 0: Proceeding with {len(short_sequences)} of {total_count} total sequences.")
+    
+    return filtered_fasta_path
 
 def count_fasta_proteins(fasta_file):
     """Counts the number of sequences in a FASTA file."""
@@ -77,20 +104,17 @@ def monitor_interproscan_progress(tsv_file, total_proteins, status_file_path):
             continue
 
 def run_interproscan(fasta_file, output_tsv, total_proteins):
-    """Executes InterProScan, disabling analyses that cause issues with long sequences."""
+    """Executes InterProScan on the provided FASTA file."""
     update_status("STEP 1: Starting InterProScan analysis...")
     
-    # --- MODIFIED COMMAND ---
-    # Added --disable-applications to skip analyses that can fail on long sequences.
-    # This is the fix for the "Value too long for column" error.
+    # Running the full InterProScan suite since long sequences have been filtered out.
     cmd = [
         INTERPROSCAN_PATH,
         "-i", fasta_file,
         "-f", "TSV",
         "-o", output_tsv,
         "--goterms",
-        "-cpu", CPU_CORES,
-        "--disable-applications", "Coils,Phobius,SignalP"
+        "-cpu", CPU_CORES
     ]
 
     monitor = multiprocessing.Process(target=monitor_interproscan_progress, args=(output_tsv, total_proteins, STATUS_FILE))
@@ -182,30 +206,32 @@ def main(force_rerun):
         os.remove(STATUS_FILE)
     update_status("Pipeline starting...")
     
+    # --- NEW: Filter long sequences before starting the main pipeline ---
+    filtered_fasta_file = filter_long_sequences(FASTA_FILE, OUTPUT_DIR)
+    
     interpro_output_tsv = os.path.join(OUTPUT_DIR, "interproscan_results.tsv")
     prediction_input_pkl = os.path.join(OUTPUT_DIR, "prediction_input.pkl")
     
-    total_proteins = count_fasta_proteins(FASTA_FILE)
+    total_proteins = count_fasta_proteins(filtered_fasta_file)
     if total_proteins == 0:
-        update_status(f"ERROR: No proteins found in FASTA file: {FASTA_FILE}")
+        update_status(f"ERROR: No proteins left after filtering. Check sequence lengths in: {FASTA_FILE}")
         return
-    update_status(f"Found {total_proteins} proteins in input file.")
-
+    
     # These steps are ontology-agnostic and only need to be run once.
     if force_rerun or not os.path.exists(interpro_output_tsv):
-        run_interproscan(FASTA_FILE, interpro_output_tsv, total_proteins)
+        run_interproscan(filtered_fasta_file, interpro_output_tsv, total_proteins)
     else:
         update_status("STEP 1: SKIPPED - Found existing InterProScan results.")
     
     if force_rerun or not os.path.exists(prediction_input_pkl):
-        create_prediction_dataframe(FASTA_FILE, interpro_output_tsv, prediction_input_pkl)
+        create_prediction_dataframe(filtered_fasta_file, interpro_output_tsv, prediction_input_pkl)
     else:
         update_status("STEP 2: SKIPPED - Found existing prediction PKL.")
 
     # Loop through each ontology to run predictions
     ontologies_to_predict = ['mf', 'bp', 'cc']
     for ontology in ontologies_to_predict:
-        deepgo_preds = run_deepgozero_prediction(input_pkl, ontology, OUTPUT_DIR)
+        deepgo_preds = run_deepgozero_prediction(prediction_input_pkl, ontology, OUTPUT_DIR)
         save_benchmark_output(deepgo_preds, ontology, OUTPUT_DIR)
     
     update_status("Pipeline finished successfully for all ontologies!")
