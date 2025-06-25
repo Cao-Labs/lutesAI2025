@@ -16,7 +16,7 @@ import multiprocessing
 FASTA_FILE = "/data/summer2020/Boen/benchmark_testing_sequences.fasta"
 
 # 2. Path to the main InterProScan executable shell script
-INTERPROSCAN_PATH = "/home/lutesAI2025/tools/interproscan-5.75-106.0/interproscan.sh"
+INTERPROSCAN_PATH = "/data/shared/tools/interproscan-5.75-106.0/interproscan.sh"
 
 # 3. Path to the cloned DeepGOZero repository
 DEEPGOZERO_PATH = "/data/shared/tools/deepgozero"
