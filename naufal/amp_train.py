@@ -81,7 +81,7 @@ if __name__ == "__main__":
     dataset = ProteinFunctionDataset(EMBEDDING_DIR, GO_MAPPING_FILE)
     dataloader = DataLoader(
         dataset,
-        batch_size=16,  #Changed from 4 to 32
+        batch_size=8,  #Changed from 4 to 32
         shuffle=True,
         num_workers=2,
         pin_memory=True
