@@ -215,6 +215,7 @@ class PredictedProteinFunction:
         return TopnGO
 
 
+
 def main():
     if len(sys.argv) < 5:
         print("This script is going to do analysis of GO terms using precision and recall.")
@@ -271,10 +272,7 @@ def main():
         for targetname in ListedTrue_ALL:
             if targetname in Threshold_predicted_BP:
                 if targetname in ListedTrue_BP and len(ListedTrue_BP[targetname]) > 0:
-                    precision, recall = GOTree.GOSetsWithoutPropagate(
-                        PredictionSet=Threshold_predicted_BP[targetname],
-                        TrueSet=ListedTrue_BP[targetname]
-                    )
+                    precision, recall = calculate_precision_recall(Threshold_predicted_BP[targetname], ListedTrue_BP[targetname])
                     overallPrecisionBP += precision
                     overallRecallBP += recall
                     index_BP += 1
@@ -283,10 +281,7 @@ def main():
 
             if targetname in Threshold_predicted_MF:
                 if targetname in ListedTrue_MF and len(ListedTrue_MF[targetname]) > 0:
-                    precision, recall = GOTree.GOSetsWithoutPropagate(
-                        PredictionSet=Threshold_predicted_BP[targetname],
-                        TrueSet=ListedTrue_BP[targetname]
-                    )
+                    precision, recall = calculate_precision_recall(Threshold_predicted_MF[targetname], ListedTrue_MF[targetname])
                     overallPrecisionMF += precision
                     overallRecallMF += recall
                     index_MF += 1
@@ -295,10 +290,8 @@ def main():
 
             if targetname in Threshold_predicted_CC:
                 if targetname in ListedTrue_CC and len(ListedTrue_CC[targetname]) > 0:
-                    precision, recall = GOTree.GOSetsWithoutPropagate(
-                        PredictionSet=Threshold_predicted_BP[targetname],
-                        TrueSet=ListedTrue_BP[targetname]
-                    )
+                    precision, recall = calculate_precision_recall(Threshold_predicted_CC[targetname], ListedTrue_CC[targetname])
+                    overallPrecisionCC += precision
                     overallRecallCC += recall
                     index_CC += 1
             else:
@@ -306,10 +299,8 @@ def main():
 
             if targetname in Threshold_predicted_ALL:
                 if targetname in ListedTrue_ALL and len(ListedTrue_ALL[targetname]) > 0:
-                    precision, recall = GOTree.GOSetsWithoutPropagate(
-                        PredictionSet=Threshold_predicted_BP[targetname],
-                        TrueSet=ListedTrue_BP[targetname]
-                    )
+                    precision, recall = calculate_precision_recall(Threshold_predicted_ALL[targetname], ListedTrue_ALL[targetname])
+                    overallPrecisionALL += precision
                     overallRecallALL += recall
                     index_ALL += 1
             else:
@@ -370,10 +361,8 @@ def main():
         for targetname in ListedTrue_ALL:
             if targetname in Top_predicted_BP:
                 if targetname in ListedTrue_BP and len(ListedTrue_BP[targetname]) > 0:
-                    precision, recall = GOTree.GOSetsWithoutPropagate(
-                        PredictionSet=Threshold_predicted_BP[targetname],
-                        TrueSet=ListedTrue_BP[targetname]
-                    )
+                    precision, recall = calculate_precision_recall(Top_predicted_BP[targetname], ListedTrue_BP[targetname])
+                    overallPrecisionBP += precision
                     overallRecallBP += recall
                     index_BP += 1
             else:
@@ -381,10 +370,8 @@ def main():
             
             if targetname in Top_predicted_MF:
                 if targetname in ListedTrue_MF and len(ListedTrue_MF[targetname]) > 0:
-                    precision, recall = GOTree.GOSetsWithoutPropagate(
-                        PredictionSet=Threshold_predicted_BP[targetname],
-                        TrueSet=ListedTrue_BP[targetname]
-                    )
+                    precision, recall = calculate_precision_recall(Top_predicted_MF[targetname], ListedTrue_MF[targetname])
+                    overallPrecisionMF += precision
                     overallRecallMF += recall
                     index_MF += 1
             else:
@@ -392,10 +379,7 @@ def main():
 
             if targetname in Top_predicted_CC:
                 if targetname in ListedTrue_CC and len(ListedTrue_CC[targetname]) > 0:
-                    precision, recall = GOTree.GOSetsWithoutPropagate(
-                        PredictionSet=Threshold_predicted_BP[targetname],
-                        TrueSet=ListedTrue_BP[targetname]
-                    )
+                    precision, recall = calculate_precision_recall(Top_predicted_CC[targetname], ListedTrue_CC[targetname])
                     overallPrecisionCC += precision
                     overallRecallCC += recall
                     index_CC += 1
@@ -404,10 +388,7 @@ def main():
 
             if targetname in Top_predicted_ALL:
                 if targetname in ListedTrue_ALL and len(ListedTrue_ALL[targetname]) > 0:
-                    precision, recall = GOTree.GOSetsWithoutPropagate(
-                        PredictionSet=Threshold_predicted_BP[targetname],
-                        TrueSet=ListedTrue_BP[targetname]
-                    )
+                    precision, recall = calculate_precision_recall(Top_predicted_ALL[targetname], ListedTrue_ALL[targetname])
                     overallPrecisionALL += precision
                     overallRecallALL += recall
                     index_ALL += 1
