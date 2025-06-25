@@ -9,6 +9,7 @@
   1. Propagated evaluation using the GeneOntologyTree.
   2. Loading a single, consolidated ground truth file and sorting terms internally.
   3. Flexible namespace matching (e.g., 'bp' or 'biological_process').
+  4. Calculation of F1-Score to find the optimal performance threshold for benchmarking.
 """
 from GeneOntologyTree import *
 import sys
@@ -30,13 +31,10 @@ class TrueProteinFunction:
         self.CCTrueGO = {}
         self.TestMode = TestMode
         
-        # This class now needs its own GeneOntologyTree to categorize terms
         self.GOTree = GeneOntologyTree(go_tree_path, TestMode=0)
         
-        # Logic to handle a single consolidated ground truth file
         if not os.path.isfile(pathGroundTruth):
             print(f"Error: The consolidated ground truth file was not found at {pathGroundTruth}")
-            # As a fallback, check if the directory structure exists
             if os.path.isdir(pathGroundTruth):
                  print("Found a directory instead. Please point to the consolidated TSV file directly.")
             sys.exit(1)
@@ -53,11 +51,9 @@ class TrueProteinFunction:
                     continue
                 protein_id, go_term = tem[0], tem[1]
 
-                # Always add to the master dictionary first
                 if protein_id not in self.AllTrueGO: self.AllTrueGO[protein_id] = []
                 self.AllTrueGO[protein_id].append(go_term)
 
-                # Get the namespace and sort the term into the correct dictionary
                 namespace = self.GOTree.GetGONameSpace(go_term)
                 if namespace == 'biological_process':
                     if protein_id not in self.BPTrueGO: self.BPTrueGO[protein_id] = []
@@ -91,7 +87,6 @@ class PredictedProteinFunction:
         self.TestMode = TestMode
         self.GOTree = GeneOntologyTree(pathGeneOntology, TestMode=0)
 
-        # Normalize the category name for robust filtering
         cat_lower = CategoryBased.lower()
         if cat_lower in ("mf", "molecular_function"):
             self.category = "molecular_function"
@@ -193,7 +188,6 @@ def main():
         sys.exit(0)
 
     goTreePath = sys.argv[1]
-    # This path should now point to your SINGLE ground truth file
     true_path = sys.argv[2] 
     dir_predictPath = sys.argv[3]
     dir_output = sys.argv[4]
@@ -203,7 +197,6 @@ def main():
 
     GOTree = GeneOntologyTree(goTreePath, TestMode=0)
 
-    # The TrueProteinFunction class now takes the OBO path to help categorize terms
     TrueGO = TrueProteinFunction(true_path, goTreePath)
     ListedTrue_BP = TrueGO.GetGroundTruth('BP')
     ListedTrue_MF = TrueGO.GetGroundTruth('MF')
@@ -212,14 +205,16 @@ def main():
     
     PredictedGO_BP = PredictedProteinFunction(goTreePath, dir_predictPath, CategoryBased="BP")
     PredictedGO_MF = PredictedProteinFunction(goTreePath, dir_predictPath, CategoryBased="MF")
-    # --- FIX: Corrected typo from goTree_path to goTreePath ---
     PredictedGO_CC = PredictedProteinFunction(goTreePath, dir_predictPath, CategoryBased="CC")
     PredictedGO_ALL = PredictedProteinFunction(goTreePath, dir_predictPath, CategoryBased="ALL")
 
     # --- Threshold-based Propagated Analysis ---
     print("\n--- Starting Threshold-based Propagated Evaluation ---")
     output_files_thresh = {cat: open(os.path.join(dir_output, f"Threshold_{cat}_propagated.txt"), 'w') for cat in ["BP", "MF", "CC", "ALL"]}
-    for f in output_files_thresh.values(): f.write("Threshold\tPrecision\tRecall\n")
+    for f in output_files_thresh.values(): f.write("Threshold\tPrecision\tRecall\tF1_Score\n")
+    
+    # Store the best F1 score found for each category
+    max_f1_scores = {cat: {'f1': -1, 'threshold': -1, 'precision': -1, 'recall': -1} for cat in ["BP", "MF", "CC", "ALL"]}
 
     for thres in [x * 0.01 for x in range(0, 101)]:
         metrics = {cat: {'p_sum': 0.0, 'r_sum': 0.0, 'count': 0} for cat in ["BP", "MF", "CC", "ALL"]}
@@ -247,11 +242,25 @@ def main():
             if data['count'] > 0:
                 avg_p = data['p_sum'] / data['count']
                 avg_r = data['r_sum'] / data['count']
-                output_files_thresh[cat].write(f"{thres:.2f}\t{avg_p:.5f}\t{avg_r:.5f}\n")
+                
+                # Calculate F1 score
+                if avg_p + avg_r == 0:
+                    f1_score = 0.0
+                else:
+                    f1_score = 2 * (avg_p * avg_r) / (avg_p + avg_r)
+                
+                output_files_thresh[cat].write(f"{thres:.2f}\t{avg_p:.5f}\t{avg_r:.5f}\t{f1_score:.5f}\n")
+
+                # Check if this is the best F1 score so far for this category
+                if f1_score > max_f1_scores[cat]['f1']:
+                    max_f1_scores[cat]['f1'] = f1_score
+                    max_f1_scores[cat]['threshold'] = thres
+                    max_f1_scores[cat]['precision'] = avg_p
+                    max_f1_scores[cat]['recall'] = avg_r
 
     for f in output_files_thresh.values(): f.close()
 
-    # --- Top-N based Propagated Analysis ---
+    # --- Top-N based Propagated Analysis (remains unchanged) ---
     print("\n--- Starting Top-N-based Propagated Evaluation ---")
     output_files_topn = {cat: open(os.path.join(dir_output, f"TopN_{cat}_propagated.txt"), 'w') for cat in ["BP", "MF", "CC", "ALL"]}
     for f in output_files_topn.values(): f.write("TopN\tPrecision\tRecall\n")
@@ -284,7 +293,19 @@ def main():
                 output_files_topn[cat].write(f"{topn}\t{avg_p:.5f}\t{avg_r:.5f}\n")
     
     for f in output_files_topn.values(): f.close()
-
+    
+    # --- Final Benchmarking Summary ---
+    print("\n\n--- Optimal F1-Score Summary for Benchmarking ---")
+    for cat, data in max_f1_scores.items():
+        if data['f1'] > -1:
+            print(f"\nOntology: {cat}")
+            print(f"  - Max F1-Score:      {data['f1']:.5f}")
+            print(f"  - Optimal Threshold: {data['threshold']:.2f}")
+            print(f"  - Precision at Opt:  {data['precision']:.5f}")
+            print(f"  - Recall at Opt:     {data['recall']:.5f}")
+        else:
+            print(f"\nOntology: {cat}")
+            print("  - No valid predictions were found to calculate an F1-Score.")
     print("\nEvaluation complete. Results saved in:", dir_output)
 
 
