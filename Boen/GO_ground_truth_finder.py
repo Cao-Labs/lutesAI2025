@@ -30,15 +30,12 @@ def load_ground_truth(ground_truth_file):
     print(f"Loaded {len(ground_truth_map)} ground truth entries.")
     return ground_truth_map
 
+# In your ground truth finder script...
+
 def extract_go_terms_from_directory(input_dir, ground_truth_map, output_file):
     """
     Reads all FASTA files from a directory, uses the filename as the protein ID,
     looks up GO terms, and saves the results to a single output file.
-
-    Args:
-        input_dir (str): Path to the directory containing FASTA files.
-        ground_truth_map (dict): The dictionary of protein IDs and their GO terms.
-        output_file (str): Path to the file where results will be saved.
     """
     print(f"Processing FASTA files from directory: {input_dir}")
     
@@ -50,22 +47,30 @@ def extract_go_terms_from_directory(input_dir, ground_truth_map, output_file):
     os.makedirs(output_dir_path, exist_ok=True)
 
     with open(output_file, 'w') as fout:
-        fout.write("Protein_ID\tGround_Truth_GO_Terms\n") # Write a header
+        # --- FIX 1: DO NOT WRITE A HEADER ---
+        # fout.write("Protein_ID\tGround_Truth_GO_Terms\n") 
 
         # Loop through all files in the input directory
         for filename in sorted(os.listdir(input_dir)):
             if filename.endswith(".fasta"):
-                # Extract protein ID from the filename (e.g., "PROTEIN_ID.fasta")
                 protein_id = os.path.splitext(filename)[0]
                 
-                # Look up the ID in our ground truth dictionary
                 if protein_id in ground_truth_map:
-                    go_terms = ground_truth_map[protein_id]
-                    fout.write(f"{protein_id}\t{go_terms}\n")
+                    # --- FIX 2: SPLIT THE GO TERMS AND LOOP THROUGH THEM ---
+                    go_terms_string = ground_truth_map[protein_id]
+                    
+                    # Split by semicolon, which is common for GO annotations
+                    individual_go_terms = go_terms_string.split(';')
+                    
+                    for go_term in individual_go_terms:
+                        if go_term: # Ensure it's not an empty string
+                            fout.write(f"{protein_id}\t{go_term.strip()}\n")
+                    # --------------------------------------------------------
                     found_count += 1
                 else:
-                    # Handle cases where the protein ID is not in the ground truth file
-                    fout.write(f"{protein_id}\tNOT_FOUND\n")
+                    # This part is fine, but you should address the ID mismatch issue
+                    # so fewer proteins end up here.
+                    print(f"ID not found in ground truth map: {protein_id}")
                     not_found_count += 1
     
     print("\nProcessing Complete.")
