@@ -94,11 +94,11 @@ class PredictedProteinFunction:
     AllPredictedGORanked = dict()         # load all predicted GO terms. Key is target name, value is a dictionary, each value is a list. [ (GO, rank), ... ]
     def __init__(self, pathGeneOntology, pathPredictions, TestMode = 1, CategoryBased = "ALL"):          # you may need to assign BP, MF, CC to CategoryBased if you only want to consider specific category of GO terms
         self.TestMode = TestMode
-        if CategoryBased.lower() == "mf" or CategoryBased.lower() == "molecular_function":
+        if CategoryBased.lower() in ("mf", "molecular_function"):
             CategoryBased = "molecular_function"
-        elif CategoryBased.lower() == "bp" or CategoryBased.lower() == "biological_process":
+        elif CategoryBased.lower() in ("bp", "biological_process"):
             CategoryBased = "biological_process"
-        elif CategoryBased.lower() == "cc" or CategoryBased.lower() == "cellular_component":
+        elif CategoryBased.lower() in ("cc", "cellular_component"):
             CategoryBased = "cellular_component"
         else:
             if CategoryBased != "ALL":
@@ -214,27 +214,6 @@ class PredictedProteinFunction:
                     TopnGO[targetname].append(GOInfor[0])
         return TopnGO
 
-def calculate_precision_recall(predicted_list, true_list):
-    """
-    Calculates precision and recall based on two lists of GO terms.
-    This implementation uses simple set intersection and does not account for GO hierarchy.
-    """
-    predicted_set = set(predicted_list)
-    true_set = set(true_list)
-
-    if not true_set and not predicted_set:
-        return 1.0, 1.0 # By convention, if both sets are empty
-    if not predicted_set:
-        return 0.0, 0.0 # No predictions means 0 precision
-    if not true_set:
-        return 0.0, 0.0 # No true terms, can't calculate recall meaningfully for most cases
-        
-    true_positives = len(predicted_set.intersection(true_set))
-    
-    precision = float(true_positives) / len(predicted_set)
-    recall = float(true_positives) / len(true_set)
-    
-    return precision, recall
 
 def main():
     if len(sys.argv) < 5:
@@ -292,7 +271,10 @@ def main():
         for targetname in ListedTrue_ALL:
             if targetname in Threshold_predicted_BP:
                 if targetname in ListedTrue_BP and len(ListedTrue_BP[targetname]) > 0:
-                    precision, recall = calculate_precision_recall(Threshold_predicted_BP[targetname], ListedTrue_BP[targetname])
+                    precision, recall = GOTree.GOSetsWithoutPropagate(
+                        PredictionSet=Threshold_predicted_BP[targetname],
+                        TrueSet=ListedTrue_BP[targetname]
+                    )
                     overallPrecisionBP += precision
                     overallRecallBP += recall
                     index_BP += 1
