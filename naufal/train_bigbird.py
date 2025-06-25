@@ -5,7 +5,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from transformers import BigBirdModel
 from tqdm import tqdm
-from wrap_data import ProteinFunctionDataset  # <-- your dataset class
+from wrap_data import ProteinFunctionDataset  # your dataset script
 
 # === Custom BigBird Model for Protein Function Prediction ===
 class CustomBigBirdModel(nn.Module):
@@ -45,7 +45,13 @@ def train_model(model, dataloader, optimizer, criterion, scheduler, num_epochs, 
             total_loss += loss.item()
             progress.set_postfix(loss=loss.item())
 
+        # Step LR scheduler
+        old_lr = optimizer.param_groups[0]['lr']
         scheduler.step(total_loss)
+        new_lr = optimizer.param_groups[0]['lr']
+        if new_lr != old_lr:
+            print(f"[LR] Learning rate reduced from {old_lr:.2e} to {new_lr:.2e}")
+
         print(f"[✓] Epoch {epoch+1} complete | Loss: {total_loss:.4f}")
 
         # Save model
@@ -67,7 +73,7 @@ if __name__ == "__main__":
     dataset = ProteinFunctionDataset(EMBEDDING_DIR, GO_MAPPING_FILE)
     dataloader = DataLoader(
         dataset,
-        batch_size=128,
+        batch_size=32,  # Reduced batch size to avoid OOM
         shuffle=True,
         num_workers=4,
         pin_memory=True
@@ -80,7 +86,7 @@ if __name__ == "__main__":
 
     optimizer = optim.Adam(model.parameters(), lr=1e-5)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=2, verbose=True, min_lr=1e-7
+        optimizer, mode='min', factor=0.5, patience=2, min_lr=1e-7
     )
     criterion = nn.BCEWithLogitsLoss()
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -98,4 +104,5 @@ if __name__ == "__main__":
     )
 
     print("[✓] Training complete.")
+
 
