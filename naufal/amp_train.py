@@ -60,12 +60,12 @@ def train_model(model, dataloader, optimizer, criterion, scheduler, num_epochs, 
         if new_lr != old_lr:
             print(f"[LR] Learning rate reduced from {old_lr:.2e} to {new_lr:.2e}")
 
-        print(f"[\u2713] Epoch {epoch+1} complete | Loss: {total_loss:.4f}")
+        print(f"[✓] Epoch {epoch+1} complete | Loss: {total_loss:.4f}")
 
         # Save model
         save_path = os.path.join(save_dir, f"proteinext_epoch_{epoch+1}.pth")
         torch.save(model.state_dict(), save_path)
-        print(f"[\u2713] Model saved to {save_path}")
+        print(f"[✓] Model saved to {save_path}")
 
     return model
 
@@ -81,9 +81,9 @@ if __name__ == "__main__":
     dataset = ProteinFunctionDataset(EMBEDDING_DIR, GO_MAPPING_FILE)
     dataloader = DataLoader(
         dataset,
-        batch_size=4,  # Lowered batch size for memory efficiency
+        batch_size=32,  #Changed from 4 to 32
         shuffle=True,
-        num_workers=2,  # Tune based on system capacity
+        num_workers=2,
         pin_memory=True
     )
 
@@ -99,7 +99,7 @@ if __name__ == "__main__":
     criterion = nn.BCEWithLogitsLoss()
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    print("[\u2713] Starting training with AMP and batch size 4...")
+    print("[✓] Starting training with AMP and batch size 32...")
     trained_model = train_model(
         model=model,
         dataloader=dataloader,
@@ -111,5 +111,6 @@ if __name__ == "__main__":
         save_dir=SAVE_DIR
     )
 
-    print("[\u2713] Training complete.")
+    print("[✓] Training complete.")
+
 
