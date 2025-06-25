@@ -3,7 +3,7 @@ import numpy as np
 import os
 
 # Path to the file
-FILE = "/data/archives/naufal/final_embeddings/PF2R_MOUSE.pt"
+FILE = "/data/archives/naufal/final_embeddings/RSMC_ECO55.pt"
 
 # Load the tensor
 if not os.path.exists(FILE):
@@ -36,4 +36,3 @@ else:
 # Preview first few rows
 print("\nFirst 10 rows:")
 print(np.array2string(array[:10], precision=3, suppress_small=True))
-

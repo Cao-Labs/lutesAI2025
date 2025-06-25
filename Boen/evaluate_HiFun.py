@@ -1,13 +1,18 @@
 # -*- coding: utf-8 -*-
 """
 Custom HiFun prediction script for protein function prediction
-Modified to run on specific FASTA file and output to specified directory
+Modified to run on specific FASTA file and output to specified directory.
+
+*** CORRECTION: This version saves ALL predictions to the evaluation file,
+*** without any pre-filtering, to ensure the evaluation script has
+*** complete data and can calculate recall correctly.
 """
 import os
 import sys
 import logging
 import pandas as pd
 import numpy as np
+import shutil
 from keras.models import load_model
 from keras_self_attention import SeqSelfAttention
 
@@ -31,12 +36,19 @@ def predict_protein_functions():
     Run HiFun predictions on testing_sequences.fasta
     """
     # File paths
-    input_fasta = '/data/summer2020/naufal/testing_sequences.fasta'
+    input_fasta = '/data/summer2020/Boen/benchmark_testing_sequences.fasta'
     output_dir = '/data/summer2020/Boen/hifun_predictions'
     hifun_dir = '/data/shared/tools/HiFun'
     
-    # Create output directory if it doesn't exist
-    os.makedirs(output_dir, exist_ok=True)
+    # Clean the output directory to ensure a fresh start
+    logger.info(f"Preparing a clean output directory at: {output_dir}")
+    if os.path.exists(output_dir):
+        logger.warning("Output directory exists. Removing it to ensure a clean run.")
+        shutil.rmtree(output_dir)
+    
+    # Create the fresh output directory
+    os.makedirs(output_dir)
+    logger.info("Output directory created.")
     
     # Change to HiFun directory to access relative paths
     original_dir = os.getcwd()
@@ -56,12 +68,8 @@ def predict_protein_functions():
         # Load pre-built models and data
         logger.info("Loading model components...")
         
-        # Check for required files
         required_files = [
-            'db/goterms_level34.pkl',
-            'db/word_index.npy',
-            'models/hifun_mode.h5',
-            'db/embeddings_matrix.npy'
+            'db/goterms_level34.pkl', 'db/word_index.npy', 'models/hifun_mode.h5'
         ]
         
         for file_path in required_files:
@@ -71,7 +79,6 @@ def predict_protein_functions():
         # Load model components
         label_index = pd.read_pickle('db/goterms_level34.pkl')
         word_index = np.load('db/word_index.npy', allow_pickle=True).item()
-        embeddings_matrix = np.load("db/embeddings_matrix.npy")
         
         logger.info("Loading trained model...")
         model = load_model('models/hifun_mode.h5',
@@ -90,64 +97,25 @@ def predict_protein_functions():
         # Make predictions
         predict_probs = model.predict([word2vec_mat, blosum_mat], verbose=1)
         
-        # Process predictions with threshold
-        threshold = 0.20
-        predict_terms = []
-        predict_names = []
-        predict_levels = []
+        # --- Save results in the "long" format for the evaluation script ---
+        eval_output_file = os.path.join(output_dir, 'predictions_for_eval.txt')
+        logger.info(f"Saving ALL predictions in evaluation format to: {eval_output_file}")
         
-        logger.info(f"Processing predictions with threshold {threshold}...")
-        for prob in predict_probs:
-            ind = np.argwhere(prob >= threshold).flatten().tolist()
-            if len(ind) > 0:
-                predict_terms.append(';'.join(label_index.iloc[ind, 0].to_list()))
-                predict_names.append(';'.join(label_index.iloc[ind, 1].to_list()))
-                predict_levels.append(';'.join(map(str, label_index.iloc[ind, 2].to_list())))
-            else:
-                predict_terms.append('')
-                predict_names.append('')
-                predict_levels.append('')
-        
-        # Create results dataframe
-        predict_res = pd.DataFrame({
-            'Protein_id': protein_id,
-            'GO_terms': predict_terms,
-            'GO_names': predict_names,
-            'GO_levels': predict_levels
-        })
-        
-        # Add probability scores for all GO terms
-        prob_df = pd.DataFrame(predict_probs, columns=label_index['terms'])
-        predict_res = pd.concat([predict_res, prob_df], axis=1)
-        
-        # Save results
-        output_file = os.path.join(output_dir, 'hifun_predictions.csv')
-        predict_res.to_csv(output_file, index=False)
-        
-        logger.info(f"Predictions saved to: {output_file}")
-        logger.info(f"Processed {len(protein_id)} proteins")
-        logger.info(f"Results shape: {predict_res.shape}")
-        
-        # Save a summary file as well
-        summary_file = os.path.join(output_dir, 'prediction_summary.txt')
-        with open(summary_file, 'w') as f:
-            f.write(f"HiFun Protein Function Prediction Results\n")
-            f.write(f"=========================================\n\n")
-            f.write(f"Input file: {input_fasta}\n")
-            f.write(f"Number of proteins processed: {len(protein_id)}\n")
-            f.write(f"Prediction threshold: {threshold}\n")
-            f.write(f"Output file: {output_file}\n")
-            f.write(f"Results dimensions: {predict_res.shape[0]} rows x {predict_res.shape[1]} columns\n\n")
-            
-            # Count proteins with predictions
-            proteins_with_predictions = sum(1 for terms in predict_terms if terms != '')
-            f.write(f"Proteins with predictions above threshold: {proteins_with_predictions}\n")
-            f.write(f"Proteins without predictions: {len(protein_id) - proteins_with_predictions}\n")
-        
-        logger.info(f"Summary saved to: {summary_file}")
-        
-        return predict_res
-        
+        with open(eval_output_file, 'w') as f:
+            f.write("AUTHOR G_Gemini\nMODEL 1\nKEYWORDS deep learning\n")
+            # Iterate through each protein and its prediction scores
+            for i, prot_id in enumerate(protein_id):
+                probs = predict_probs[i]
+                for j, go_term in enumerate(label_index['terms']):
+                    score = probs[j]
+                    # --- FIX ---
+                    # Write ALL predictions, no matter how low the score.
+                    # The evaluation script will handle the thresholding.
+                    f.write(f"{prot_id}\t{go_term}\t{score:.5f}\n")
+            f.write("END\n")
+
+        logger.info("Evaluation format file saved.")
+
     except Exception as e:
         logger.error(f"Error during prediction: {str(e)}")
         raise
@@ -160,9 +128,9 @@ def main():
     Main function to run the prediction pipeline
     """
     try:
-        results = predict_protein_functions()
+        predict_protein_functions()
         print("Prediction completed successfully!")
-        print(f"Results saved to: /data/summer2020/Boen/output/")
+        print(f"Results saved to: /data/summer2020/Boen/hifun_predictions/")
         
     except Exception as e:
         print(f"Error: {str(e)}")
