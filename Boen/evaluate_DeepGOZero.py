@@ -77,9 +77,21 @@ def monitor_interproscan_progress(tsv_file, total_proteins, status_file_path):
             continue
 
 def run_interproscan(fasta_file, output_tsv, total_proteins):
-    """Executes InterProScan and starts a parallel monitoring process."""
+    """Executes InterProScan, disabling analyses that cause issues with long sequences."""
     update_status("STEP 1: Starting InterProScan analysis...")
-    cmd = [INTERPROSCAN_PATH, "-i", fasta_file, "-f", "TSV", "-o", output_tsv, "--goterms", "-cpu", CPU_CORES]
+    
+    # --- MODIFIED COMMAND ---
+    # Added --disable-applications to skip analyses that can fail on long sequences.
+    # This is the fix for the "Value too long for column" error.
+    cmd = [
+        INTERPROSCAN_PATH,
+        "-i", fasta_file,
+        "-f", "TSV",
+        "-o", output_tsv,
+        "--goterms",
+        "-cpu", CPU_CORES,
+        "--disable-applications", "Coils,Phobius,SignalP"
+    ]
 
     monitor = multiprocessing.Process(target=monitor_interproscan_progress, args=(output_tsv, total_proteins, STATUS_FILE))
     monitor.daemon = True
@@ -193,7 +205,7 @@ def main(force_rerun):
     # Loop through each ontology to run predictions
     ontologies_to_predict = ['mf', 'bp', 'cc']
     for ontology in ontologies_to_predict:
-        deepgo_preds = run_deepgozero_prediction(prediction_input_pkl, ontology, OUTPUT_DIR)
+        deepgo_preds = run_deepgozero_prediction(input_pkl, ontology, OUTPUT_DIR)
         save_benchmark_output(deepgo_preds, ontology, OUTPUT_DIR)
     
     update_status("Pipeline finished successfully for all ontologies!")
