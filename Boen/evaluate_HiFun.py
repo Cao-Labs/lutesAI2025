@@ -4,8 +4,9 @@ Custom HiFun prediction script for protein function prediction.
 MODIFIED to iterate through a directory of individual FASTA files and use the
 filename as the protein ID to ensure consistency with the ground truth generation script.
 
-*** CORRECTION: The word2vec model is now pre-loaded to prevent reloading it in a loop,
-*** which significantly improves performance.
+This version has been reverted to avoid pre-loading the word2vec model to
+circumvent environment-specific 'gensim' library errors. This will be slower
+but more robust against dependency issues.
 """
 import os
 import sys
@@ -15,7 +16,6 @@ import numpy as np
 import shutil
 from keras.models import load_model
 from keras_self_attention import SeqSelfAttention
-from gensim.models.fasttext import FastText # <-- ADDED: Import for fasttext model
 
 # Add HiFun directory to Python path
 sys.path.append('/data/shared/tools/HiFun')
@@ -52,7 +52,7 @@ def predict_protein_functions():
     os.chdir(hifun_dir)
     
     try:
-        # --- FIX: Load all models ONCE before the loop ---
+        # Load model components once before the loop
         logger.info("Loading model components...")
         label_index = pd.read_pickle('db/goterms_level34.pkl')
         word_index = np.load('db/word_index.npy', allow_pickle=True).item()
@@ -64,16 +64,6 @@ def predict_protein_functions():
                               'auc_tensor': auc_tensor,
                               'multi_category_focal_loss2_fixed': focal_loss(gamma=2., alpha=.25)
                           })
-
-        # --- THIS IS THE CRITICAL FIX ---
-        # Define path and pre-load the word2vec model to avoid reloading it in the loop
-        word2vec_model_path = 'db/uniprot_sprot.bin' # Adjust this path if necessary
-        logger.info(f"Pre-loading word2vec model from: {word2vec_model_path}...")
-        if not os.path.exists(word2vec_model_path):
-            raise FileNotFoundError(f"Word2vec model not found at: {word2vec_model_path}")
-        word2vec_model = FastText.load_fasttext_format(word2vec_model_path)
-        logger.info("Word2vec model loaded.")
-        # ---------------------------------
         
         # Prepare the output file
         eval_output_file = os.path.join(output_dir, 'predictions_for_eval.txt')
@@ -88,8 +78,10 @@ def predict_protein_functions():
             for i, filename in enumerate(fasta_files):
                 logger.info(f"Processing file {i+1}/{len(fasta_files)}: {filename}")
                 
+                # Get protein ID from the filename to ensure it matches the ground truth script
                 prot_id_from_filename = os.path.splitext(filename)[0]
                 
+                # Load the single protein sequence from its file
                 fasta_path = os.path.join(input_fasta_dir, filename)
                 _, protein_seq, _ = load_fasta(fasta_path)
                 
@@ -97,16 +89,17 @@ def predict_protein_functions():
                     logger.warning(f"Could not load sequence from {filename}. Skipping.")
                     continue
 
-                # Generate embeddings for the single protein
+                # Generate embeddings for the single protein.
+                # Note: This is slow because word2vec_embedding reloads the FastText model internally.
+                # This approach is used to avoid the external 'gensim' dependency error.
                 blosum_mat = blosum_embedding(protein_seq)
-                # Pass the pre-loaded model into the function
-                word2vec_mat = word2vec_embedding(protein_seq, word_index, word2vec_model=word2vec_model, trim_len=1000)
+                word2vec_mat = word2vec_embedding(protein_seq, word_index, trim_len=1000)
                 
                 # Make predictions for this protein
                 predict_probs = model.predict([word2vec_mat, blosum_mat], verbose=0)
                 
                 # Iterate through prediction scores and write to file
-                probs_for_protein = predict_probs[0]
+                probs_for_protein = predict_probs[0] # The result is a list containing one array
                 for j, go_term in enumerate(label_index['terms']):
                     score = probs_for_protein[j]
                     f.write(f"{prot_id_from_filename}\t{go_term}\t{score:.5f}\n")
