@@ -21,7 +21,7 @@ import operator
 class TrueProteinFunction:
     """
     This class loads and manages ground truth GO annotations.
-    ***. MODIFIED to load from a single consolidated file and sort terms internally. ***
+    *** MODIFIED to load from a single consolidated file and sort terms internally. ***
     """
     def __init__(self, pathGroundTruth, go_tree_path, TestMode=0):
         self.AllTrueGO = {}
@@ -212,7 +212,8 @@ def main():
     
     PredictedGO_BP = PredictedProteinFunction(goTreePath, dir_predictPath, CategoryBased="BP")
     PredictedGO_MF = PredictedProteinFunction(goTreePath, dir_predictPath, CategoryBased="MF")
-    PredictedGO_CC = PredictedProteinFunction(goTree_path, dir_predictPath, CategoryBased="CC")
+    # --- FIX: Corrected typo from goTree_path to goTreePath ---
+    PredictedGO_CC = PredictedProteinFunction(goTreePath, dir_predictPath, CategoryBased="CC")
     PredictedGO_ALL = PredictedProteinFunction(goTreePath, dir_predictPath, CategoryBased="ALL")
 
     # --- Threshold-based Propagated Analysis ---
