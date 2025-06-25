@@ -5,9 +5,10 @@
   Modified by G_Gemini: 6/25/2025 
   Purpose: To perform a standard, propagated Gene Ontology evaluation for protein function predictions.
 
-  This script calculates precision and recall for predicted GO terms against a ground truth set.
-  It correctly handles the GO hierarchy by propagating annotations up to the root before comparison,
-  which is the standard methodology for CAFA and other bioinformatics benchmarks.
+  This is the final, corrected version of the script. It correctly handles:
+  1. Propagated evaluation using the GeneOntologyTree.
+  2. Loading a single, consolidated ground truth file and sorting terms internally.
+  3. Flexible namespace matching (e.g., 'bp' or 'biological_process').
 """
 from GeneOntologyTree import *
 import sys
@@ -19,34 +20,31 @@ import operator
 
 class TrueProteinFunction:
     """
-    This class loads and manages the ground truth GO annotations from standard CAFA-formatted files.
+    This class loads and manages ground truth GO annotations.
+    *** MODIFIED to load from a single consolidated file and sort terms internally. ***
     """
-    def __init__(self, pathGroundTruth, TestMode=0):
-        self.AllTrueGO = dict()
-        self.BPTrueGO = dict()
-        self.MFTrueGO = dict()
-        self.CCTrueGO = dict()
+    def __init__(self, pathGroundTruth, go_tree_path, TestMode=0):
+        self.AllTrueGO = {}
+        self.BPTrueGO = {}
+        self.MFTrueGO = {}
+        self.CCTrueGO = {}
         self.TestMode = TestMode
         
-        if os.path.isdir(pathGroundTruth):
-            # Assumes a directory with specific files for each ontology branch
-            BPPath = os.path.join(pathGroundTruth, "leafonly_BPO_unique.txt")
-            CCPath = os.path.join(pathGroundTruth, "leafonly_CCO_unique.txt")
-            MFPath = os.path.join(pathGroundTruth, "leafonly_MFO_unique.txt")
-            if not all(os.path.isfile(p) for p in [BPPath, CCPath, MFPath]):
-                print(f"Error: One or more required ground truth files not found in {pathGroundTruth}")
-                sys.exit(1)
-            self.loadFile(BPPath, "BP")
-            self.loadFile(CCPath, "CC")
-            self.loadFile(MFPath, "MF")
-        else:
-            if not os.path.isfile(pathGroundTruth):
-                print(f"Error: Cannot load true GO terms from {pathGroundTruth}")
-                sys.exit(1)
-            self.loadFile(pathGroundTruth, "ALL")
+        # This class now needs its own GeneOntologyTree to categorize terms
+        self.GOTree = GeneOntologyTree(go_tree_path, TestMode=0)
+        
+        # Logic to handle a single consolidated ground truth file
+        if not os.path.isfile(pathGroundTruth):
+            print(f"Error: The consolidated ground truth file was not found at {pathGroundTruth}")
+            # As a fallback, check if the directory structure exists
+            if os.path.isdir(pathGroundTruth):
+                 print("Found a directory instead. Please point to the consolidated TSV file directly.")
+            sys.exit(1)
+        
+        self.loadFile(pathGroundTruth)
 
-    def loadFile(self, GOpath, GOtype):
-        self.PrintMessage(f"Loading ground truth file: {GOpath}")
+    def loadFile(self, GOpath):
+        self.PrintMessage(f"Loading and sorting ground truth from single file: {GOpath}")
         with open(GOpath, "r") as fh:
             for line in fh:
                 tem = line.strip().split()
@@ -55,20 +53,21 @@ class TrueProteinFunction:
                     continue
                 protein_id, go_term = tem[0], tem[1]
 
-                # Add to specific ontology dictionary
-                if GOtype == "BP":
-                    if protein_id not in self.BPTrueGO: self.BPTrueGO[protein_id] = []
-                    self.BPTrueGO[protein_id].append(go_term)
-                elif GOtype == "CC":
-                    if protein_id not in self.CCTrueGO: self.CCTrueGO[protein_id] = []
-                    self.CCTrueGO[protein_id].append(go_term)
-                elif GOtype == "MF":
-                    if protein_id not in self.MFTrueGO: self.MFTrueGO[protein_id] = []
-                    self.MFTrueGO[protein_id].append(go_term)
-
-                # Always add to the master dictionary
+                # Always add to the master dictionary first
                 if protein_id not in self.AllTrueGO: self.AllTrueGO[protein_id] = []
                 self.AllTrueGO[protein_id].append(go_term)
+
+                # Get the namespace and sort the term into the correct dictionary
+                namespace = self.GOTree.GetGONameSpace(go_term)
+                if namespace == 'biological_process':
+                    if protein_id not in self.BPTrueGO: self.BPTrueGO[protein_id] = []
+                    self.BPTrueGO[protein_id].append(go_term)
+                elif namespace == 'molecular_function':
+                    if protein_id not in self.MFTrueGO: self.MFTrueGO[protein_id] = []
+                    self.MFTrueGO[protein_id].append(go_term)
+                elif namespace == 'cellular_component':
+                    if protein_id not in self.CCTrueGO: self.CCTrueGO[protein_id] = []
+                    self.CCTrueGO[protein_id].append(go_term)
 
     def GetGroundTruth(self, GOtype):
         if GOtype == "BP": return self.BPTrueGO
@@ -105,7 +104,6 @@ class PredictedProteinFunction:
                 print(f"Warning: Did not recognize category '{CategoryBased}'. Defaulting to 'ALL'.")
             self.category = "ALL"
         
-        # Load predictions from a single file or a directory of files
         if os.path.isdir(pathPredictions):
             self.loadFolders(pathPredictions)
         else:
@@ -123,7 +121,6 @@ class PredictedProteinFunction:
                 
                 prot_id, go_term, score = tem[0], tem[1], tem[2]
 
-                # Filter by GO namespace if a specific category is requested
                 if self.category != "ALL":
                     namespace = self.GOTree.GetGONameSpace(go_term)
                     if namespace != self.category:
@@ -139,20 +136,15 @@ class PredictedProteinFunction:
 
     def _RankAllGOterms(self):
         for targetname, predictions in self.AllPredictedGO.items():
-            # Use a dict to handle duplicate GO terms, keeping the highest score
             temHash = {}
             for go_term, score in predictions:
                 score = float(score)
                 if go_term not in temHash or score > temHash[go_term]:
                     temHash[go_term] = score
             
-            # Rank the unique GO terms by score
             sorted_x = sorted(temHash.items(), key=operator.itemgetter(1), reverse=True)
             
-            # Assign ranks, handling ties by giving them the same average rank
-            RankedGO = {}
-            SameValueGO = {}
-            rank = 1
+            RankedGO, SameValueGO, rank = {}, {}, 1
             for go_term, score in sorted_x:
                 RankedGO[go_term] = rank
                 if score not in SameValueGO: SameValueGO[score] = []
@@ -196,24 +188,23 @@ class PredictedProteinFunction:
 
 def main():
     if len(sys.argv) < 5:
-        print("Usage: python evaluation_metrics.py <path_to_obo> <path_to_ground_truth> <path_to_predictions> <path_to_output_dir>")
-        print("This script performs a propagated evaluation of GO terms using precision and recall.")
+        print("Usage: python evaluation_metrics.py <path_to_obo> <path_to_consolidated_ground_truth.tsv> <path_to_predictions> <path_to_output_dir>")
         showExample()
         sys.exit(0)
 
     goTreePath = sys.argv[1]
-    dir_truePath = sys.argv[2]
+    # This path should now point to your SINGLE ground truth file
+    true_path = sys.argv[2] 
     dir_predictPath = sys.argv[3]
     dir_output = sys.argv[4]
 
     if not os.path.exists(dir_output):
         os.makedirs(dir_output)
 
-    # The GeneOntologyTree is instantiated once and provides the evaluation logic
     GOTree = GeneOntologyTree(goTreePath, TestMode=0)
 
-    # Load ground truth and predictions for each category
-    TrueGO = TrueProteinFunction(dir_truePath)
+    # The TrueProteinFunction class now takes the OBO path to help categorize terms
+    TrueGO = TrueProteinFunction(true_path, goTreePath)
     ListedTrue_BP = TrueGO.GetGroundTruth('BP')
     ListedTrue_MF = TrueGO.GetGroundTruth('MF')
     ListedTrue_CC = TrueGO.GetGroundTruth('CC')
@@ -221,19 +212,13 @@ def main():
     
     PredictedGO_BP = PredictedProteinFunction(goTreePath, dir_predictPath, CategoryBased="BP")
     PredictedGO_MF = PredictedProteinFunction(goTreePath, dir_predictPath, CategoryBased="MF")
-    PredictedGO_CC = PredictedProteinFunction(goTreePath, dir_predictPath, CategoryBased="CC")
+    PredictedGO_CC = PredictedProteinFunction(goTree_path, dir_predictPath, CategoryBased="CC")
     PredictedGO_ALL = PredictedProteinFunction(goTreePath, dir_predictPath, CategoryBased="ALL")
 
     # --- Threshold-based Propagated Analysis ---
     print("\n--- Starting Threshold-based Propagated Evaluation ---")
-    output_files_thresh = {
-        "BP": open(os.path.join(dir_output, "Threshold_BP_propagated.txt"), 'w'),
-        "MF": open(os.path.join(dir_output, "Threshold_MF_propagated.txt"), 'w'),
-        "CC": open(os.path.join(dir_output, "Threshold_CC_propagated.txt"), 'w'),
-        "ALL": open(os.path.join(dir_output, "Threshold_ALL_propagated.txt"), 'w')
-    }
-    for f in output_files_thresh.values():
-        f.write("Threshold\tPrecision\tRecall\n")
+    output_files_thresh = {cat: open(os.path.join(dir_output, f"Threshold_{cat}_propagated.txt"), 'w') for cat in ["BP", "MF", "CC", "ALL"]}
+    for f in output_files_thresh.values(): f.write("Threshold\tPrecision\tRecall\n")
 
     for thres in [x * 0.01 for x in range(0, 101)]:
         metrics = {cat: {'p_sum': 0.0, 'r_sum': 0.0, 'count': 0} for cat in ["BP", "MF", "CC", "ALL"]}
@@ -244,16 +229,12 @@ def main():
             "CC": PredictedGO_CC.GetPredictedGO_threshold(thres),
             "ALL": PredictedGO_ALL.GetPredictedGO_threshold(thres)
         }
-        
         true_sets = {"BP": ListedTrue_BP, "MF": ListedTrue_MF, "CC": ListedTrue_CC, "ALL": ListedTrue_ALL}
 
         for target in true_sets["ALL"]:
             for cat in ["BP", "MF", "CC", "ALL"]:
                 if target in predictions_thresh[cat] and target in true_sets[cat]:
-                    precision, recall = GOTree.GOSetsPropagate(
-                        predictions_thresh[cat][target],
-                        true_sets[cat][target]
-                    )
+                    precision, recall = GOTree.GOSetsPropagate(predictions_thresh[cat][target], true_sets[cat][target])
                     if precision >= 0 and recall >= 0:
                         metrics[cat]['p_sum'] += precision
                         metrics[cat]['r_sum'] += recall
@@ -271,14 +252,8 @@ def main():
 
     # --- Top-N based Propagated Analysis ---
     print("\n--- Starting Top-N-based Propagated Evaluation ---")
-    output_files_topn = {
-        "BP": open(os.path.join(dir_output, "TopN_BP_propagated.txt"), 'w'),
-        "MF": open(os.path.join(dir_output, "TopN_MF_propagated.txt"), 'w'),
-        "CC": open(os.path.join(dir_output, "TopN_CC_propagated.txt"), 'w'),
-        "ALL": open(os.path.join(dir_output, "TopN_ALL_propagated.txt"), 'w')
-    }
-    for f in output_files_topn.values():
-        f.write("TopN\tPrecision\tRecall\n")
+    output_files_topn = {cat: open(os.path.join(dir_output, f"TopN_{cat}_propagated.txt"), 'w') for cat in ["BP", "MF", "CC", "ALL"]}
+    for f in output_files_topn.values(): f.write("TopN\tPrecision\tRecall\n")
 
     for topn in range(1, 21):
         metrics = {cat: {'p_sum': 0.0, 'r_sum': 0.0, 'count': 0} for cat in ["BP", "MF", "CC", "ALL"]}
@@ -290,15 +265,10 @@ def main():
             "ALL": PredictedGO_ALL.GetPredictedGO_topn(topn)
         }
         
-        true_sets = {"BP": ListedTrue_BP, "MF": ListedTrue_MF, "CC": ListedTrue_CC, "ALL": ListedTrue_ALL}
-        
         for target in true_sets["ALL"]:
             for cat in ["BP", "MF", "CC", "ALL"]:
                 if target in predictions_topn[cat] and target in true_sets[cat]:
-                    precision, recall = GOTree.GOSetsPropagate(
-                        predictions_topn[cat][target],
-                        true_sets[cat][target]
-                    )
+                    precision, recall = GOTree.GOSetsPropagate(predictions_topn[cat][target], true_sets[cat][target])
                     if precision >= 0 and recall >= 0:
                         metrics[cat]['p_sum'] += precision
                         metrics[cat]['r_sum'] += recall
@@ -319,7 +289,7 @@ def main():
 
 def showExample():
     print("Example usage:")
-    print("python evaluation_metrics.py ../data/go.obo ../data/groundtruth/ ../data/predictions/ ../results/PropagatedResults")
+    print("python evaluation_metrics.py ../data/go.obo ../data/groundtruth.tsv ../data/predictions/ ../results/PropagatedResults")
 
 
 if __name__ == '__main__':
