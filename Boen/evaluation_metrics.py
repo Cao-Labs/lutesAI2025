@@ -214,7 +214,27 @@ class PredictedProteinFunction:
                     TopnGO[targetname].append(GOInfor[0])
         return TopnGO
 
+def calculate_precision_recall(predicted_list, true_list):
+    """
+    Calculates precision and recall based on two lists of GO terms.
+    This implementation uses simple set intersection and does not account for GO hierarchy.
+    """
+    predicted_set = set(predicted_list)
+    true_set = set(true_list)
 
+    if not true_set and not predicted_set:
+        return 1.0, 1.0 # By convention, if both sets are empty
+    if not predicted_set:
+        return 0.0, 0.0 # No predictions means 0 precision
+    if not true_set:
+        return 0.0, 0.0 # No true terms, can't calculate recall meaningfully for most cases
+        
+    true_positives = len(predicted_set.intersection(true_set))
+    
+    precision = float(true_positives) / len(predicted_set)
+    recall = float(true_positives) / len(true_set)
+    
+    return precision, recall
 
 def main():
     if len(sys.argv) < 5:
