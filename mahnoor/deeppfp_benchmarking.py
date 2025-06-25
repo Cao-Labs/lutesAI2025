@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 import os
 
 from deeppfp_model import Net
-from representationsDataset import representationsDataset
+from deeppfp_representationsDataset import representationsDataset
 
 def run_predictions(test_path, state_path, batch_size=64, layer=48, nums=None, device=torch.device("cpu")):
     # Load testing dataset
