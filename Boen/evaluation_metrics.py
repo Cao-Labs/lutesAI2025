@@ -21,7 +21,7 @@ import operator
 class TrueProteinFunction:
     """
     This class loads and manages ground truth GO annotations.
-    *** MODIFIED to load from a single consolidated file and sort terms internally. ***
+    ***. MODIFIED to load from a single consolidated file and sort terms internally. ***
     """
     def __init__(self, pathGroundTruth, go_tree_path, TestMode=0):
         self.AllTrueGO = {}
