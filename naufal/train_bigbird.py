@@ -5,7 +5,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from transformers import BigBirdModel
 from tqdm import tqdm
-from wrap_data import ProteinFunctionDataset  # <-- your dataset class
+from wrap_data import ProteinFunctionDataset  # your dataset script
 
 # === Custom BigBird Model for Protein Function Prediction ===
 class CustomBigBirdModel(nn.Module):
@@ -73,7 +73,7 @@ if __name__ == "__main__":
     dataset = ProteinFunctionDataset(EMBEDDING_DIR, GO_MAPPING_FILE)
     dataloader = DataLoader(
         dataset,
-        batch_size=128,
+        batch_size=32,  # Reduced batch size to avoid OOM
         shuffle=True,
         num_workers=4,
         pin_memory=True
