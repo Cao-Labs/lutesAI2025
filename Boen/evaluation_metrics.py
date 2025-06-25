@@ -49,22 +49,24 @@ class TrueProteinFunction:
                 if len(tem)<2:
                     print("Warning, what is "+ str(line))
                     continue
+                protein_id = tem[0]
+                go_term = tem[1]
                 if GOtype == "BP":
-                    if tem[0] not in self.BPTrueGO:
-                        self.BPTrueGO[tem[0]] = []
-                    self.BPTrueGO[tem[0]].append(tem[1])
+                    if protein_id not in self.BPTrueGO:
+                        self.BPTrueGO[protein_id] = []
+                    self.BPTrueGO[protein_id].append(go_term)
                 elif GOtype == "CC":
-                    if tem[0] not in self.CCTrueGO:
-                        self.CCTrueGO[tem[0]] = []
-                    self.CCTrueGO[tem[0]].append(tem[1])
+                    if protein_id not in self.CCTrueGO:
+                        self.CCTrueGO[protein_id] = []
+                    self.CCTrueGO[protein_id].append(go_term)
                 elif GOtype == "MF":
-                    if tem[0] not in self.MFTrueGO:
-                        self.MFTrueGO[tem[0]] = []
-                    self.MFTrueGO[tem[0]].append(tem[1])
+                    if protein_id not in self.MFTrueGO:
+                        self.MFTrueGO[protein_id] = []
+                    self.MFTrueGO[protein_id].append(go_term)
                 # anyhow, we will add GO terms to all dictionary
-                if tem[0] not in self.AllTrueGO:
-                    self.AllTrueGO[tem[0]] = []
-                self.AllTrueGO[tem[0]].append(tem[1])
+                if protein_id not in self.AllTrueGO:
+                    self.AllTrueGO[protein_id] = []
+                self.AllTrueGO[protein_id].append(go_term)
 
     """
         This function is going to return true GO terms
@@ -125,9 +127,6 @@ class PredictedProteinFunction:
                 if self.category != "ALL":     # you only want to consider specific GO category
                     thecategory = self.GOTree.GetGONameSpace(tem[1])
                     if thecategory!= self.category:
-                        #print "Skip this GO term"+str(line)
-                        #print self.category
-                        #print thecategory
                         continue
                 if tem[0] not in self.AllPredictedGO:
                     self.AllPredictedGO[tem[0]] = []
@@ -161,7 +160,6 @@ class PredictedProteinFunction:
             RankedGO = dict()
             SameValueGO = dict()       # key is score, value is list of GO with the same score
             for i in range(len(sorted_x)):
-                #print sorted_x[i]
                 RankedGO[sorted_x[i][0]] = myrank
                 if sorted_x[i][1] not in SameValueGO:
                     SameValueGO[sorted_x[i][1]] = []
@@ -182,7 +180,6 @@ class PredictedProteinFunction:
             for each in RankedGO:
                 rankedGOlist.append((each,RankedGO[each]))
             self.AllPredictedGORanked[targetname] = rankedGOlist
-            #print SameValueGO
 
     """
        THis function is used to analyze GO terms by selecting a threshold to filter all GO terms. Only return the dictionary and for each target, the GO terms larger or equal to threshold will be kept
@@ -217,14 +214,31 @@ class PredictedProteinFunction:
                     TopnGO[targetname].append(GOInfor[0])
         return TopnGO
 
+def calculate_precision_recall(predicted_list, true_list):
+    """
+    Calculates precision and recall based on two lists of GO terms.
+    This implementation uses simple set intersection and does not account for GO hierarchy.
+    """
+    predicted_set = set(predicted_list)
+    true_set = set(true_list)
 
-
-
-
+    if not true_set and not predicted_set:
+        return 1.0, 1.0 # By convention, if both sets are empty
+    if not predicted_set:
+        return 0.0, 0.0 # No predictions means 0 precision
+    if not true_set:
+        return 0.0, 0.0 # No true terms, can't calculate recall meaningfully for most cases
+        
+    true_positives = len(predicted_set.intersection(true_set))
+    
+    precision = float(true_positives) / len(predicted_set)
+    recall = float(true_positives) / len(true_set)
+    
+    return precision, recall
 
 def main():
     if len(sys.argv) < 5:
-        print("This script is going to do analysis of GO terms. We use GeneOntologyTree class to compare similarity of GO terms.")
+        print("This script is going to do analysis of GO terms using precision and recall.")
         print("We use CAFA official benchmark true GO terms folder (leafonly_BPO_unique.txt, leafonly_CCO_unique.txt, leafonly_MFO_unique.txt), and your CAFA predictions folder(like CaoLab4_1_273057.txt), output folder to save results")
 
         showExample()
@@ -238,281 +252,196 @@ def main():
     if not os.path.exists(dir_output):
         os.makedirs(dir_output)
 
-    #TrueGOExample = TrueProteinFunction(sys.argv[2],TestMode=0)
-    #print(TrueGOExample.GetGroundTruth("BP"))
-
-    #PredictedGOExample = PredictedProteinFunction(sys.argv[1], sys.argv[3], TestMode=0, CategoryBased = "bp")        # you need to mention where is the geneonlotyTree
-
-    #print(PredictedGOExample.GetGOFromTarget("T992870001312"))
-    #PredictedGOExample.GetPredictedGO_threshold(0.6)
-    #mytop10 = PredictedGOExample.GetPredictedGO_topn(3)
-    #print mytop10['T992870001312']
-
-    #TrueBPPath = dir_truePath + "/leafonly_BPO_unique.txt"
-    #TrueCCPath = dir_truePath + "/leafonly_CCO_unique.txt"
-    #TrueMFPath = dir_truePath + "/leafonly_MFO_unique.txt"
-
-    GOTree = GeneOntologyTree(goTreePath,TestMode=0)
-    # 1. analyze BP, CC, MF true and predicted
     TrueGO = TrueProteinFunction(dir_truePath)
-    PredictedGO_BP = PredictedProteinFunction(goTreePath, dir_predictPath, TestMode=0, CategoryBased = "BP")
-    ListedTrue_BP = TrueGO.GetGroundTruth('BP')              # only keep BP category
-    PredictedGO_MF = PredictedProteinFunction(goTreePath, dir_predictPath, TestMode=0, CategoryBased = "MF")
-    ListedTrue_MF = TrueGO.GetGroundTruth('MF')              # only keep MF category
-    PredictedGO_CC = PredictedProteinFunction(goTreePath, dir_predictPath, TestMode=0, CategoryBased = "CC")
-    ListedTrue_CC = TrueGO.GetGroundTruth('CC')              # only keep CC category
-    PredictedGO_ALL = PredictedProteinFunction(goTreePath, dir_predictPath, TestMode=0, CategoryBased = "ALL")
-    ListedTrue_ALL = TrueGO.GetGroundTruth('ALL')              #  keep all category
+    PredictedGO_BP = PredictedProteinFunction(goTreePath, dir_predictPath, TestMode=0, CategoryBased="BP")
+    ListedTrue_BP = TrueGO.GetGroundTruth('BP')
+    PredictedGO_MF = PredictedProteinFunction(goTreePath, dir_predictPath, TestMode=0, CategoryBased="MF")
+    ListedTrue_MF = TrueGO.GetGroundTruth('MF')
+    PredictedGO_CC = PredictedProteinFunction(goTreePath, dir_predictPath, TestMode=0, CategoryBased="CC")
+    ListedTrue_CC = TrueGO.GetGroundTruth('CC')
+    PredictedGO_ALL = PredictedProteinFunction(goTreePath, dir_predictPath, TestMode=0, CategoryBased="ALL")
+    ListedTrue_ALL = TrueGO.GetGroundTruth('ALL')
 
-    fhThresholdBP = open(dir_output+"/Threshold_BP.txt",'w')
-    fhThresholdMF = open(dir_output+"/Threshold_MF.txt",'w')
-    fhThresholdCC = open(dir_output+"/Threshold_CC.txt",'w')
-    fhThresholdALL = open(dir_output+"/Threshold_ALL.txt",'w')
+    fhThresholdBP = open(dir_output + "/Threshold_BP.txt", 'w')
+    fhThresholdMF = open(dir_output + "/Threshold_MF.txt", 'w')
+    fhThresholdCC = open(dir_output + "/Threshold_CC.txt", 'w')
+    fhThresholdALL = open(dir_output + "/Threshold_ALL.txt", 'w')
 
-    threshBP = []
-    threshMF = []
-    threshCC = []
-    threshALL = []
+    # Write headers to output files
+    fhThresholdBP.write("Threshold\tPrecision\tRecall\n")
+    fhThresholdMF.write("Threshold\tPrecision\tRecall\n")
+    fhThresholdCC.write("Threshold\tPrecision\tRecall\n")
+    fhThresholdALL.write("Threshold\tPrecision\tRecall\n")
+
+    threshBP, threshMF, threshCC, threshALL = [], [], [], []
+    
     # 2 threshold based analysis
-    for thres in [x*0.01 for x in range(0,101)]:
-        #print thres
-        overallPreBP = 0.0
+    for thres in [x * 0.01 for x in range(0, 101)]:
+        overallPrecisionBP, overallRecallBP = 0.0, 0.0
+        overallPrecisionMF, overallRecallMF = 0.0, 0.0
+        overallPrecisionCC, overallRecallCC = 0.0, 0.0
+        overallPrecisionALL, overallRecallALL = 0.0, 0.0
+        
+        index_BP, index_CC, index_MF, index_ALL = 0, 0, 0, 0
 
-        overallPreMF = 0.0
-
-        overallPreCC = 0.0
-
-        overallPreALL = 0.0
-
-        index_BP = 0
-        index_CC = 0
-        index_MF = 0
-        index_ALL = 0
         Threshold_predicted_BP = PredictedGO_BP.GetPredictedGO_threshold(thres)
         Threshold_predicted_MF = PredictedGO_MF.GetPredictedGO_threshold(thres)
         Threshold_predicted_CC = PredictedGO_CC.GetPredictedGO_threshold(thres)
         Threshold_predicted_ALL = PredictedGO_ALL.GetPredictedGO_threshold(thres)
 
         for targetname in ListedTrue_ALL:
-            #print targetname,
-            #print ListedTrue_BP[targetname],
-
             if targetname in Threshold_predicted_BP:
-                if targetname in ListedTrue_BP and len(ListedTrue_BP[targetname])>0:
-                    precisionBP = GOTree.MaxSimilarity(PredictionSet=Threshold_predicted_BP[targetname],TrueSet=ListedTrue_BP[targetname])
-                    if float(precisionBP) >= 0:
-                        #fhThresholdBP.write(str(targetname)+"|True:"+str(ListedTrue_BP[targetname]) + "|Predicted:"+str(Threshold_predicted_BP[targetname])+"|Precition and Recall"+str(precisionBP)+","+str(recallBP)+"\n")
-                        index_BP+=1
-                        overallPreBP+=float(precisionBP)
-
-
+                if targetname in ListedTrue_BP and len(ListedTrue_BP[targetname]) > 0:
+                    precision, recall = calculate_precision_recall(Threshold_predicted_BP[targetname], ListedTrue_BP[targetname])
+                    overallPrecisionBP += precision
+                    overallRecallBP += recall
+                    index_BP += 1
             else:
                 print("Warning, missing target for BP: " + str(targetname))
 
             if targetname in Threshold_predicted_MF:
-                if targetname in ListedTrue_MF and len(ListedTrue_MF[targetname])>0:
-                    precisionMF = GOTree.MaxSimilarity(PredictionSet=Threshold_predicted_MF[targetname],TrueSet=ListedTrue_MF[targetname])
-                    if float(precisionMF) >= 0  :
-                        #fhThresholdMF.write(str(targetname)+"|True:"+str(ListedTrue_MF[targetname]) + "|Predicted:"+str(Threshold_predicted_MF[targetname])+"|Precition and Recall"+str(precisionMF)+","+str(recallMF)+"\n")
-                        index_MF+=1
-                        overallPreMF+=float(precisionMF)
-
+                if targetname in ListedTrue_MF and len(ListedTrue_MF[targetname]) > 0:
+                    precision, recall = calculate_precision_recall(Threshold_predicted_MF[targetname], ListedTrue_MF[targetname])
+                    overallPrecisionMF += precision
+                    overallRecallMF += recall
+                    index_MF += 1
             else:
                 print("Warning, missing target for MF: " + str(targetname))
 
             if targetname in Threshold_predicted_CC:
-                if targetname in ListedTrue_CC and len(ListedTrue_CC[targetname])>0:
-                    precisionCC = GOTree.MaxSimilarity(PredictionSet=Threshold_predicted_CC[targetname],TrueSet=ListedTrue_CC[targetname])
-                    if float(precisionCC) >= 0  :
-                        #fhThresholdCC.write(str(targetname)+"|True:"+str(ListedTrue_CC[targetname]) + "|Predicted:"+str(Threshold_predicted_CC[targetname])+"|Precition and Recall"+str(precisionCC)+","+str(recallCC)+"\n")
-                        index_CC+=1
-                        overallPreCC+=float(precisionCC)
-
+                if targetname in ListedTrue_CC and len(ListedTrue_CC[targetname]) > 0:
+                    precision, recall = calculate_precision_recall(Threshold_predicted_CC[targetname], ListedTrue_CC[targetname])
+                    overallPrecisionCC += precision
+                    overallRecallCC += recall
+                    index_CC += 1
             else:
                 print("Warning, missing target for CC: " + str(targetname))
 
             if targetname in Threshold_predicted_ALL:
-                precisionALL= GOTree.MaxSimilarity(PredictionSet=Threshold_predicted_ALL[targetname],TrueSet=ListedTrue_ALL[targetname])
-                if float(precisionALL)>=0 :
-                    #fhThresholdALL.write(str(targetname)+"|True:"+str(ListedTrue_ALL[targetname]) + "|Predicted:"+str(Threshold_predicted_ALL[targetname])+"|Precition and Recall"+str(precisionALL)+","+str(recallALL)+"\n")
-                    index_ALL+=1
-                    overallPreALL+=float(precisionALL)
-
-
+                if targetname in ListedTrue_ALL and len(ListedTrue_ALL[targetname]) > 0:
+                    precision, recall = calculate_precision_recall(Threshold_predicted_ALL[targetname], ListedTrue_ALL[targetname])
+                    overallPrecisionALL += precision
+                    overallRecallALL += recall
+                    index_ALL += 1
             else:
                 print("Warning, missing target for ALL: " + str(targetname))
 
-        if index_BP!=0:
-            overallPreBP/=index_BP
+        if index_BP != 0:
+            threshBP.append((thres, overallPrecisionBP / index_BP, overallRecallBP / index_BP))
+        if index_MF != 0:
+            threshMF.append((thres, overallPrecisionMF / index_MF, overallRecallMF / index_MF))
+        if index_CC != 0:
+            threshCC.append((thres, overallPrecisionCC / index_CC, overallRecallCC / index_CC))
+        if index_ALL != 0:
+            threshALL.append((thres, overallPrecisionALL / index_ALL, overallRecallALL / index_ALL))
 
-        if index_MF!=0:
-            overallPreMF/=index_MF
-
-        if index_CC!=0:
-            overallPreCC/=index_CC
-
-        if index_ALL!=0:
-            overallPreALL/=index_ALL
-
-
-        threshBP.append((thres,overallPreBP))
-        threshMF.append((thres,overallPreMF))
-        threshCC.append((thres,overallPreCC))
-        threshALL.append((thres,overallPreALL))
-        #print "For threshold" + str(thres)+" , your average model precision and recall is "+str(overallPreBP)+" and "+str(overallRecallBP)
-        print("For threshold" + str(thres) + ", we evaluated BP, MF, CC, and ALL the following number: " + str(index_BP) + "," + str(index_MF) + "," + str(index_CC) + "," + str(index_ALL))
-
-        #sys.exit(0)
+        print("For threshold " + str(thres) + ", we evaluated BP, MF, CC, and ALL the following number: " + str(index_BP) + "," + str(index_MF) + "," + str(index_CC) + "," + str(index_ALL))
 
     for each in threshBP:
-        fhThresholdBP.write(str(each[0]) + "\t" + str(each[1])  + "\n")
+        fhThresholdBP.write(str(each[0]) + "\t" + str(each[1]) + "\t" + str(each[2]) + "\n")
     for each in threshMF:
-        fhThresholdMF.write(str(each[0]) + "\t" + str(each[1]) + "\n")
+        fhThresholdMF.write(str(each[0]) + "\t" + str(each[1]) + "\t" + str(each[2]) + "\n")
     for each in threshCC:
-        fhThresholdCC.write(str(each[0]) + "\t" + str(each[1]) + "\n")
+        fhThresholdCC.write(str(each[0]) + "\t" + str(each[1]) + "\t" + str(each[2]) + "\n")
     for each in threshALL:
-        fhThresholdALL.write(str(each[0]) + "\t" + str(each[1])  + "\n")
+        fhThresholdALL.write(str(each[0]) + "\t" + str(each[1]) + "\t" + str(each[2]) + "\n")
 
     fhThresholdBP.close()
     fhThresholdMF.close()
     fhThresholdCC.close()
     fhThresholdALL.close()
 
+    fhTopBP = open(dir_output + "/Topn_BP.txt", 'w')
+    fhTopMF = open(dir_output + "/Topn_MF.txt", 'w')
+    fhTopCC = open(dir_output + "/Topn_CC.txt", 'w')
+    fhTopALL = open(dir_output + "/Topn_ALL.txt", 'w')
 
+    # Write headers to top-n files
+    fhTopBP.write("TopN\tPrecision\tRecall\n")
+    fhTopMF.write("TopN\tPrecision\tRecall\n")
+    fhTopCC.write("TopN\tPrecision\tRecall\n")
+    fhTopALL.write("TopN\tPrecision\tRecall\n")
 
+    topnBP, topnMF, topnCC, topnALL = [], [], [], []
 
-
-    fhTopBP = open(dir_output+"/Topn_BP.txt",'w')
-    fhTopMF = open(dir_output+"/Topn_MF.txt",'w')
-    fhTopCC = open(dir_output+"/Topn_CC.txt",'w')
-    fhTopALL = open(dir_output+"/Topn_ALL.txt",'w')
-
-    topnBP = []
-    topnMF = []
-    topnCC = []
-    topnALL = []
     # 3 topn based analysis
-    for topn in [x for x in range(1,21)]:
-        #print thres
-        overallPreBP = 0.0
+    for topn in [x for x in range(1, 21)]:
+        overallPrecisionBP, overallRecallBP = 0.0, 0.0
+        overallPrecisionMF, overallRecallMF = 0.0, 0.0
+        overallPrecisionCC, overallRecallCC = 0.0, 0.0
+        overallPrecisionALL, overallRecallALL = 0.0, 0.0
 
-        overallPreMF = 0.0
+        index_BP, index_CC, index_MF, index_ALL = 0, 0, 0, 0
 
-        overallPreCC = 0.0
-
-        overallPreALL = 0.0
-
-        index_BP = 0
-        index_CC = 0
-        index_MF = 0
-        index_ALL = 0
         Top_predicted_BP = PredictedGO_BP.GetPredictedGO_topn(topn)
         Top_predicted_MF = PredictedGO_MF.GetPredictedGO_topn(topn)
         Top_predicted_CC = PredictedGO_CC.GetPredictedGO_topn(topn)
         Top_predicted_ALL = PredictedGO_ALL.GetPredictedGO_topn(topn)
 
         for targetname in ListedTrue_ALL:
-            #print targetname,
-            #print ListedTrue_BP[targetname],
             if targetname in Top_predicted_BP:
-                if targetname in ListedTrue_BP:
-                    precisionBP = GOTree.MaxSimilarity(PredictionSet=Top_predicted_BP[targetname],TrueSet=ListedTrue_BP[targetname])
-                    if float(precisionBP) >= 0  :
-                        #fhTopBP.write(str(targetname)+"|True:"+str(ListedTrue_BP[targetname]) + "|Predicted:"+str(Top_predicted_BP[targetname])+"|Precition and Recall"+str(precisionBP)+","+str(recallBP)+"\n")
-                        index_BP+=1
-                        overallPreBP+=float(precisionBP)
-
+                if targetname in ListedTrue_BP and len(ListedTrue_BP[targetname]) > 0:
+                    precision, recall = calculate_precision_recall(Top_predicted_BP[targetname], ListedTrue_BP[targetname])
+                    overallPrecisionBP += precision
+                    overallRecallBP += recall
+                    index_BP += 1
             else:
                 print("Warning, missing target for BP: " + str(targetname))
-
+            
             if targetname in Top_predicted_MF:
-                if targetname in ListedTrue_MF:
-                    precisionMF = GOTree.MaxSimilarity(PredictionSet=Top_predicted_MF[targetname],TrueSet=ListedTrue_MF[targetname])
-                    if float(precisionMF) >= 0 :
-                        #fhTopMF.write(str(targetname)+"|True:"+str(ListedTrue_MF[targetname]) + "|Predicted:"+str(Top_predicted_MF[targetname])+"|Precition and Recall"+str(precisionMF)+","+str(recallMF)+"\n")
-                        index_MF+=1
-                        overallPreMF+=float(precisionMF)
-
+                if targetname in ListedTrue_MF and len(ListedTrue_MF[targetname]) > 0:
+                    precision, recall = calculate_precision_recall(Top_predicted_MF[targetname], ListedTrue_MF[targetname])
+                    overallPrecisionMF += precision
+                    overallRecallMF += recall
+                    index_MF += 1
             else:
                 print("Warning, missing target for MF: " + str(targetname))
 
             if targetname in Top_predicted_CC:
-                if targetname in ListedTrue_CC:
-                    precisionCC = GOTree.MaxSimilarity(PredictionSet=Top_predicted_CC[targetname],TrueSet=ListedTrue_CC[targetname])
-                    if float(precisionCC) >= 0  :
-                        #fhTopCC.write(str(targetname)+"|True:"+str(ListedTrue_CC[targetname]) + "|Predicted:"+str(Top_predicted_CC[targetname])+"|Precition and Recall"+str(precisionCC)+","+str(recallCC)+"\n")
-                        index_CC+=1
-                        overallPreCC+=float(precisionCC)
-
+                if targetname in ListedTrue_CC and len(ListedTrue_CC[targetname]) > 0:
+                    precision, recall = calculate_precision_recall(Top_predicted_CC[targetname], ListedTrue_CC[targetname])
+                    overallPrecisionCC += precision
+                    overallRecallCC += recall
+                    index_CC += 1
             else:
                 print("Warning, missing target for CC: " + str(targetname))
 
             if targetname in Top_predicted_ALL:
-                precisionALL = GOTree.MaxSimilarity(PredictionSet=Top_predicted_ALL[targetname],TrueSet=ListedTrue_ALL[targetname])
-                if float(precisionALL) >= 0 :
-                    #fhTopALL.write(str(targetname)+"|True:"+str(ListedTrue_ALL[targetname]) + "|Predicted:"+str(Top_predicted_ALL[targetname])+"|Precition and Recall"+str(precisionALL)+","+str(recallALL)+"\n")
-                    index_ALL+=1
-                    overallPreALL+=float(precisionALL)
-
+                if targetname in ListedTrue_ALL and len(ListedTrue_ALL[targetname]) > 0:
+                    precision, recall = calculate_precision_recall(Top_predicted_ALL[targetname], ListedTrue_ALL[targetname])
+                    overallPrecisionALL += precision
+                    overallRecallALL += recall
+                    index_ALL += 1
             else:
                 print("Warning, missing target for ALL: " + str(targetname))
 
-        if index_BP!=0:
-            overallPreBP/=index_BP
-
-        if index_MF!=0:
-            overallPreMF/=index_MF
-
-        if index_CC!=0:
-            overallPreCC/=index_CC
-
-        if index_ALL!=0:
-            overallPreALL/=index_ALL
-
-
-        topnBP.append((topn,overallPreBP))
-        topnMF.append((topn,overallPreMF))
-        topnCC.append((topn,overallPreCC))
-        topnALL.append((topn,overallPreALL))
-        #print "For Top" + str(thres)+" , your average model precision and recall is "+str(overallPreBP)+" and "+str(overallRecallBP)
+        if index_BP != 0:
+            topnBP.append((topn, overallPrecisionBP / index_BP, overallRecallBP / index_BP))
+        if index_MF != 0:
+            topnMF.append((topn, overallPrecisionMF / index_MF, overallRecallMF / index_MF))
+        if index_CC != 0:
+            topnCC.append((topn, overallPrecisionCC / index_CC, overallRecallCC / index_CC))
+        if index_ALL != 0:
+            topnALL.append((topn, overallPrecisionALL / index_ALL, overallRecallALL / index_ALL))
+            
         print("For Top " + str(topn) + ", we evaluated BP, MF, CC, and ALL the following number: " + str(index_BP) + "," + str(index_MF) + "," + str(index_CC) + "," + str(index_ALL))
 
-        #sys.exit(0)
-
     for each in topnBP:
-        fhTopBP.write(str(each[0]) + "\t" + str(each[1]) + "\n")
+        fhTopBP.write(str(each[0]) + "\t" + str(each[1]) + "\t" + str(each[2]) + "\n")
     for each in topnMF:
-        fhTopMF.write(str(each[0]) + "\t" + str(each[1]) + "\n")
+        fhTopMF.write(str(each[0]) + "\t" + str(each[1]) + "\t" + str(each[2]) + "\n")
     for each in topnCC:
-        fhTopCC.write(str(each[0]) + "\t" + str(each[1])  + "\n")
+        fhTopCC.write(str(each[0]) + "\t" + str(each[1]) + "\t" + str(each[2]) + "\n")
     for each in topnALL:
-        fhTopALL.write(str(each[0]) + "\t" + str(each[1]) + "\n")
+        fhTopALL.write(str(each[0]) + "\t" + str(each[1]) + "\t" + str(each[2]) + "\n")
 
     fhTopBP.close()
     fhTopMF.close()
     fhTopCC.close()
     fhTopALL.close()
 
-
-    #sys.exit(0)
-    #GOTree = GeneOntologyTree(sys.argv[1],TestMode=1)
-
-    #print(GOTree.GetGONameSpace('GO:0000002'))
-    #print(GOTree.GetGONameSpace('GO:0000009'))
-    #sys.exit(0)
-    #print GOTree.GOSimilarity(123,343)
-    #myTrueSet= ['GO:0000001','GO:0000010']
-    #myPreSet= ['GO:0000011','GO:0000010','GO:0000006']
-    #print(GOTree.GOSetsWithoutPropagate(PredictionSet=myPreSet,TrueSet=myTrueSet))    # make sure the first parameter is prediction, second is true
-    #print(GOTree.MaxSimilarity(PredictionSet=myPreSet,TrueSet=myTrueSet))    # make sure the first parameter is prediction, second is true
-    #GOTree._displayTree()
-
-
-
-
-
 def showExample():
-    print("python "+sys.argv[0] + " ../data/gene_ontology_edit.obo.2016-06-01 ../data/Selected10Data/groundtruth ../data/SelectedCaoLabPredictions/ ../result/GOAnalysisResult_CaoLab3_Maxsimilarity")
+    print("python " + sys.argv[0] + " ../data/gene_ontology_edit.obo.2016-06-01 ../data/Selected10Data/groundtruth ../data/SelectedCaoLabPredictions/ ../result/GOAnalysisResult_PrecisionRecall")
 
 if __name__ == '__main__':
     main()
