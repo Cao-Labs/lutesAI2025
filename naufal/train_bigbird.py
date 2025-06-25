@@ -1,139 +1,101 @@
 import os
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
-from transformers import BigBirdForSequenceClassification, BigBirdConfig, AdamW, get_scheduler
-from collections import defaultdict
-from sklearn.metrics import f1_score
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from transformers import BigBirdModel
 from tqdm import tqdm
+from wrap_data import ProteinFunctionDataset  # <-- your dataset class
 
-# === Dataset Class ===
-class ProteinFunctionDataset(Dataset):
-    def __init__(self, embedding_dir, go_mapping_file):
-        self.embedding_dir = embedding_dir
-        self.go_mapping_file = go_mapping_file
+# === Custom BigBird Model for Protein Function Prediction ===
+class CustomBigBirdModel(nn.Module):
+    def __init__(self, input_dim, num_classes):
+        super(CustomBigBirdModel, self).__init__()
+        self.embedding_proj = nn.Linear(input_dim, 768)  # Project to BigBird input dim
+        self.bigbird = BigBirdModel.from_pretrained('google/bigbird-roberta-base')
+        self.classifier = nn.Linear(self.bigbird.config.hidden_size, num_classes)
 
-        print("[INFO] Scanning embedding files...")
-        self.ids = set(fname[:-3] for fname in os.listdir(embedding_dir) if fname.endswith(".pt"))
-        print(f"[INFO] Found {len(self.ids):,} embedding files.")
-
-        self.go_labels = defaultdict(list)
-        go_terms_set = set()
-
-        print("[INFO] Parsing GO annotations...")
-        with open(go_mapping_file, "r") as f:
-            for line in f:
-                pid, terms = line.strip().split("\t")
-                if pid in self.ids:
-                    term_list = terms.split(";")
-                    self.go_labels[pid] = term_list
-                    go_terms_set.update(term_list)
-
-        self.go_vocab = {go_term: idx for idx, go_term in enumerate(sorted(go_terms_set))}
-        self.num_labels = len(self.go_vocab)
-        print(f"[INFO] GO vocabulary size: {self.num_labels:,}")
-
-        self.ids = list(self.ids)
-
-    def __len__(self):
-        return len(self.ids)
-
-    def __getitem__(self, idx):
-        pid = self.ids[idx]
-        embedding = torch.load(os.path.join(self.embedding_dir, f"{pid}.pt"))  # [L, 1541]
-
-        attention_mask = (embedding.sum(dim=1) != 0).long()  # [L]
-        target = torch.zeros(self.num_labels)
-        for term in self.go_labels.get(pid, []):
-            if term in self.go_vocab:
-                target[self.go_vocab[term]] = 1.0
-
-        return embedding, attention_mask, target
-
-# === Model Wrapper ===
-class BigBirdProteinModel(nn.Module):
-    def __init__(self, input_dim, target_dim, max_len):
-        super().__init__()
-        self.project = nn.Linear(input_dim, 1536)  # make divisible by num_heads (8)
-        config = BigBirdConfig(
-            vocab_size=50265,  # dummy
-            hidden_size=1536,
-            num_attention_heads=8,
-            num_hidden_layers=12,
-            attention_type="block_sparse",
-            block_size=64,
-            max_position_embeddings=max_len,
-            gradient_checkpointing=True,
-            use_bias=True,
-            is_decoder=False,
-            num_labels=target_dim,
-        )
-        self.bigbird = BigBirdForSequenceClassification(config)
-        self.bigbird.classifier = nn.Sequential(
-            nn.Linear(config.hidden_size, 512),
-            nn.ReLU(),
-            nn.Linear(512, target_dim)
-        )
-
-    def forward(self, x, attention_mask):
-        x = self.project(x)  # [B, L, 1536]
-        outputs = self.bigbird(inputs_embeds=x, attention_mask=attention_mask)
-        return outputs.logits  # [B, num_labels]
+    def forward(self, embeddings, attention_mask):
+        projected = self.embedding_proj(embeddings)  # (B, L, 768)
+        outputs = self.bigbird(inputs_embeds=projected, attention_mask=attention_mask)
+        cls_output = outputs.last_hidden_state[:, 0, :]  # CLS token
+        logits = self.classifier(cls_output)
+        return logits
 
 # === Training Function ===
-def train():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    batch_size = 128
-    epochs = 5
-    learning_rate = 1e-5
-    patience = 2
-    min_lr = 1e-7
+def train_model(model, dataloader, optimizer, criterion, scheduler, num_epochs, device, save_dir):
+    model.to(device)
+    for epoch in range(num_epochs):
+        model.train()
+        total_loss = 0.0
+        progress = tqdm(dataloader, desc=f"Epoch {epoch + 1}/{num_epochs}")
 
-    dataset = ProteinFunctionDataset(
-        "/data/archives/naufal/final_embeddings",
-        "/data/summer2020/naufal/matched_ids_with_go.txt"
-    )
+        for embeddings, labels, _ in progress:
+            embeddings, labels = embeddings.to(device), labels.to(device)
 
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
+            # Create attention mask: 1 where embedding is non-zero, else 0
+            attention_mask = (embeddings.abs().sum(dim=-1) != 0).int()
 
-    model = BigBirdProteinModel(input_dim=1541, target_dim=dataset.num_labels, max_len=1913).to(device)
-
-    optimizer = AdamW(model.parameters(), lr=learning_rate)
-    lr_scheduler = get_scheduler(
-        name="reduce_on_plateau",
-        optimizer=optimizer,
-        factor=0.5,
-        patience=1,
-        threshold=0.001,
-        min_lr=min_lr,
-    )
-
-    bce_loss = nn.BCEWithLogitsLoss()
-    model.train()
-
-    for epoch in range(epochs):
-        print(f"\n[Epoch {epoch+1}/{epochs}]")
-        epoch_loss = 0.0
-        for i, (x, attn_mask, y) in enumerate(tqdm(dataloader)):
-            x, attn_mask, y = x.to(device), attn_mask.to(device), y.to(device)
             optimizer.zero_grad()
-            preds = model(x, attn_mask)
-            loss = bce_loss(preds, y)
+            outputs = model(embeddings, attention_mask)
+            loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
 
-            epoch_loss += loss.item()
+            total_loss += loss.item()
+            progress.set_postfix(loss=loss.item())
 
-            if i == 0 or (i + 1) % 10000 == 0:
-                print(f"[✓] Trained {i + 1:,} proteins")
+        scheduler.step(total_loss)
+        print(f"[✓] Epoch {epoch+1} complete | Loss: {total_loss:.4f}")
 
-        avg_loss = epoch_loss / len(dataloader)
-        print(f"[INFO] Avg Loss: {avg_loss:.4f}")
-        lr_scheduler.step(avg_loss)
+        # Save model
+        save_path = os.path.join(save_dir, f"proteinext_epoch_{epoch+1}.pth")
+        torch.save(model.state_dict(), save_path)
+        print(f"[✓] Model saved to {save_path}")
 
-    torch.save(model.state_dict(), "bigbird_finetuned.pt")
-    print("[✓] Model saved as bigbird_finetuned.pt")
+    return model
 
+# === Main Block ===
 if __name__ == "__main__":
-    train()
+    # Filepaths
+    EMBEDDING_DIR = "/data/archives/naufal/final_embeddings"
+    GO_MAPPING_FILE = "/data/summer2020/naufal/matched_ids_with_go.txt"
+    SAVE_DIR = "/data/summer2020/naufal/proteinext_bigbird_checkpoints"
+    os.makedirs(SAVE_DIR, exist_ok=True)
+
+    # Dataset & Dataloader
+    dataset = ProteinFunctionDataset(EMBEDDING_DIR, GO_MAPPING_FILE)
+    dataloader = DataLoader(
+        dataset,
+        batch_size=128,
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True
+    )
+
+    # Model and training setup
+    input_dim = 1541
+    num_classes = dataset.num_labels
+    model = CustomBigBirdModel(input_dim=input_dim, num_classes=num_classes)
+
+    optimizer = optim.Adam(model.parameters(), lr=1e-5)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=2, verbose=True, min_lr=1e-7
+    )
+    criterion = nn.BCEWithLogitsLoss()
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    print("[✓] Starting training...")
+    trained_model = train_model(
+        model=model,
+        dataloader=dataloader,
+        optimizer=optimizer,
+        criterion=criterion,
+        scheduler=scheduler,
+        num_epochs=5,
+        device=device,
+        save_dir=SAVE_DIR
+    )
+
+    print("[✓] Training complete.")
 
