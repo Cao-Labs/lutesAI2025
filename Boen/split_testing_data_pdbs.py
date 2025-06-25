@@ -23,12 +23,19 @@ def create_id_map_from_file(mapping_filepath):
     """
     Parses the idmapping_uni.txt file to create a mapping from the
     protein ID (e.g., '001R_FRG3G') to the UniProt ID (e.g., 'Q6GZX4').
+    Includes a progress indicator for large files.
     """
-    print(f"Parsing ID mapping file to create map: {mapping_filepath}")
+    print(f"Parsing ID mapping file to create map: {mapping_filepath}", end='', flush=True)
     mapping = {}
+    line_count = 0
     try:
         with open(mapping_filepath, 'r') as f:
             for line in f:
+                line_count += 1
+                # Print a progress dot every 100,000 lines
+                if line_count % 100000 == 0:
+                    print('.', end='', flush=True)
+
                 # Strip whitespace and split into parts
                 parts = line.strip().split()
                 if len(parts) >= 2:
@@ -37,13 +44,15 @@ def create_id_map_from_file(mapping_filepath):
                     # Map protein_id to uniprot_id
                     mapping[protein_id] = uniprot_id
     except FileNotFoundError:
-        print(f"FATAL ERROR: ID Mapping file not found at {mapping_filepath}")
+        print(f"\nFATAL ERROR: ID Mapping file not found at {mapping_filepath}")
         return None
     except Exception as e:
-        print(f"An error occurred while parsing the ID mapping file: {e}")
+        print(f"\nAn error occurred while parsing the ID mapping file: {e}")
         return None
-        
-    print(f"Successfully created a map with {len(mapping)} entries.")
+    
+    # Print a newline after the progress dots are finished
+    print()
+    print(f"Successfully created a map with {len(mapping)} entries from {line_count} lines.")
     return mapping
 
 # --- Main Script ---
