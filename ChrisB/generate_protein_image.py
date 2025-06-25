@@ -56,11 +56,13 @@ def to_2d_matrix(embedding):
 
 def normalize_matrix(matrix):
     """
-    Normalize matrix values to range [0, 1] for consistent visualization.
+    Normalize matrix values to range [0, 1] using percentile clipping
+    to avoid outlier distortion in visualization.
     """
-    min_val = matrix.min()
-    max_val = matrix.max()
-    return (matrix - min_val) / (max_val - min_val + 1e-8)
+    lower = np.percentile(matrix, 1)
+    upper = np.percentile(matrix, 99)
+    clipped = np.clip(matrix, lower, upper)
+    return (clipped - clipped.min()) / (clipped.max() - clipped.min() + 1e-8)
 
 def save_image(matrix, output_path):
     """
