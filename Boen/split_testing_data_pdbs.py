@@ -6,139 +6,120 @@ import shutil
 SRC_PDB_DIR = "/data/summer2020/naufal/testing_pdbs"
 
 # Directory containing your 10,000 individual .fasta files
-# The script will use the names of these files to find the matching PDBs.
+# The script uses the filenames (without extension) as the lookup key.
 FASTA_DIR = "/data/summer2020/Boen/benchmark_testing_sequences"
 
 # Destination directory for the corresponding .pdb files
 DEST_PDB_DIR = "/data/summer2020/Boen/benchmark_testing_pdbs"
 
+# --- IMPORTANT ---
+# Path to the UniProt ID mapping file.
+# The script assumes this file has the format: UniProtID ProteinID
+ID_MAPPING_FILE = "/data/shared/databases/UniProt2025/idmapping_uni.txt"
+
 # --- Helper Function ---
 
-def get_uniprot_id_from_fasta(filepath):
+def create_id_map_from_file(mapping_filepath):
     """
-    Parses a FASTA file to extract the UniProt ID from its header.
-    It assumes a standard UniProt format in the header, like:
-    >sp|Q9Y6I3|DAPB_METMJ ...
-    where 'Q9Y6I3' is the ID.
+    Parses the idmapping_uni.txt file to create a mapping from the
+    protein ID (e.g., '001R_FRG3G') to the UniProt ID (e.g., 'Q6GZX4').
     """
+    print(f"Parsing ID mapping file to create map: {mapping_filepath}")
+    mapping = {}
     try:
-        with open(filepath, 'r') as f:
-            # Use .strip() to remove leading/trailing whitespace and newlines
-            header = f.readline().strip()
-            if header.startswith('>'):
-                # The UniProt ID is typically the second item when split by '|'
-                parts = header.split('|')
-                if len(parts) > 1:
-                    uniprot_id = parts[1]
-                    # Add a simple validation check for what a UniProt ID looks like
-                    # It allows for hyphens in isoform IDs (e.g., P12345-1)
-                    if (6 <= len(uniprot_id) <= 11) and uniprot_id.replace('-', '').isalnum():
-                        return uniprot_id
+        with open(mapping_filepath, 'r') as f:
+            for line in f:
+                # Strip whitespace and split into parts
+                parts = line.strip().split()
+                if len(parts) >= 2:
+                    uniprot_id = parts[0]
+                    protein_id = parts[1]
+                    # Map protein_id to uniprot_id
+                    mapping[protein_id] = uniprot_id
+    except FileNotFoundError:
+        print(f"FATAL ERROR: ID Mapping file not found at {mapping_filepath}")
+        return None
     except Exception as e:
-        # This will report if a file can't be opened or read
-        print(f"Warning: Could not read file {os.path.basename(filepath)}. Error: {e}")
-    return None
+        print(f"An error occurred while parsing the ID mapping file: {e}")
+        return None
+        
+    print(f"Successfully created a map with {len(mapping)} entries.")
+    return mapping
 
 # --- Main Script ---
 
 def create_corresponding_pdb_set():
     """
-    Finds and copies PDB files that correspond to FASTA files by extracting
-    UniProt IDs from the FASTA file headers. Deletes the destination
-    directory if it already exists and adds debugging for failed parsing.
+    Copies PDB files corresponding to individual FASTA files by using an
+    ID mapping file to link protein IDs to UniProt IDs.
     """
     print("--- Starting PDB Set Creation ---")
 
-    # Step 1: Check if the destination directory exists and delete it
+    # Step 1: Create the ID mapping from the provided file
+    id_map = create_id_map_from_file(ID_MAPPING_FILE)
+    if id_map is None or not id_map:
+        print("Could not create ID map. Aborting script.")
+        return
+
+    # Step 2: Check if the destination directory exists and delete it
     if os.path.exists(DEST_PDB_DIR):
-        print(f"Found existing directory at {DEST_PDB_DIR}. Deleting it.")
+        print(f"\nFound existing directory at {DEST_PDB_DIR}. Deleting it.")
         try:
             shutil.rmtree(DEST_PDB_DIR)
             print("Successfully deleted old directory.")
         except Exception as e:
-            print(f"Error: Could not delete directory {DEST_PDB_DIR}. Please remove it manually. Error: {e}")
+            print(f"Error: Could not delete directory {DEST_PDB_DIR}. Error: {e}")
             return
 
-    # Step 2: Create the fresh destination directory
+    # Step 3: Create the fresh destination directory
     print(f"Creating new destination directory: {DEST_PDB_DIR}")
     os.makedirs(DEST_PDB_DIR)
 
-    # Step 3: Get the list of target PDB filenames by parsing FASTA headers
-    print(f"\nParsing FASTA files in {FASTA_DIR} to find target UniProt IDs...")
-    target_pdb_filenames = set()
-    failed_parses = []
+    # Step 4: Iterate through individual FASTA files and find their PDBs
+    print(f"\nMatching FASTA files from {FASTA_DIR} with PDBs from {SRC_PDB_DIR}...")
     
     try:
         fasta_files = [f for f in os.listdir(FASTA_DIR) if f.endswith(('.fasta', '.fa'))]
-        if not fasta_files:
-            print(f"Error: No .fasta files found in your FASTA directory: {FASTA_DIR}")
-            return
     except FileNotFoundError:
-        print(f"Error: FASTA directory not found at {FASTA_DIR}")
+        print(f"Error: Individual FASTA directory not found at {FASTA_DIR}")
         return
 
-    # Iterate through each FASTA file to find its UniProt ID
-    for fasta_filename in fasta_files:
-        fasta_filepath = os.path.join(FASTA_DIR, fasta_filename)
-        uniprot_id = get_uniprot_id_from_fasta(fasta_filepath)
-        
-        if uniprot_id:
-            pdb_filename = f"AF-{uniprot_id}-F1-model_v4.pdb"
-            target_pdb_filenames.add(pdb_filename)
-        else:
-            # If parsing failed, save the filename to report later
-            failed_parses.append(fasta_filename)
-
-    print(f"Successfully constructed {len(target_pdb_filenames)} target PDB filenames.")
-
-    # Step 4: Add debugging for any files that could not be parsed
-    if failed_parses:
-        print(f"\n--- DEBUGGING INFORMATION ---")
-        print(f"Warning: Could not extract a valid UniProt ID from {len(failed_parses)} FASTA files.")
-        print("This is likely because the FASTA header format is not what the script expects (e.g., >sp|ID|...).")
-        print("Here are the headers from the first 5 files that failed to parse:")
-        
-        for filename in failed_parses[:5]:
-            filepath = os.path.join(FASTA_DIR, filename)
-            try:
-                with open(filepath, 'r') as f:
-                    header = f.readline().strip()
-                    print(f"  - File: {filename}, Header: {header}")
-            except Exception as e:
-                print(f"  - Could not read header from {filename}. Error: {e}")
-        print("-----------------------------\n")
-
-    # Step 5: Get a list of all available PDB files from the source directory
-    try:
-        available_pdb_files = {f for f in os.listdir(SRC_PDB_DIR) if f.endswith('.pdb')}
-        print(f"Found {len(available_pdb_files)} PDB files in the source directory.")
-    except FileNotFoundError:
-        print(f"Error: Source PDB directory not found at {SRC_PDB_DIR}")
-        return
-
-    # Step 6: Find the intersection of target files and available files
-    pdbs_to_copy = target_pdb_filenames.intersection(available_pdb_files)
-    missing_pdbs = target_pdb_filenames.difference(available_pdb_files)
-    print(f"Found {len(pdbs_to_copy)} matching PDB files to copy.")
-
-    # Step 7: Copy the matching files
     copied_count = 0
-    for pdb_filename in pdbs_to_copy:
+    not_found_in_map = 0
+    not_found_in_source = 0
+
+    for fasta_filename in fasta_files:
+        # Get protein ID from filename, e.g., 'SUCC_RHORT' from 'SUCC_RHORT.fasta'
+        protein_id = os.path.splitext(fasta_filename)[0]
+        
+        # Look up the UniProt ID in our map
+        uniprot_id = id_map.get(protein_id)
+        
+        if not uniprot_id:
+            not_found_in_map += 1
+            continue
+
+        # Construct the target PDB filename
+        pdb_filename = f"AF-{uniprot_id}-F1-model_v4.pdb"
         src_path = os.path.join(SRC_PDB_DIR, pdb_filename)
         dest_path = os.path.join(DEST_PDB_DIR, pdb_filename)
-        
-        try:
-            shutil.copy2(src_path, dest_path)
-            copied_count += 1
-        except Exception as e:
-            print(f"Error: Could not copy file {pdb_filename}. Error: {e}")
+
+        # Check if the PDB file exists and copy it
+        if os.path.exists(src_path):
+            try:
+                shutil.copy2(src_path, dest_path)
+                copied_count += 1
+            except Exception as e:
+                print(f"Could not copy file {pdb_filename}. Error: {e}")
+        else:
+            not_found_in_source += 1
 
     print(f"\n--- PDB Set Creation Complete ---")
     print(f"Successfully copied {copied_count} files to {DEST_PDB_DIR}.")
-
-    # Step 8: Report any target PDBs that were not found in the source directory
-    if missing_pdbs:
-        print(f"\nWarning: Could not find {len(missing_pdbs)} corresponding PDB files in {SRC_PDB_DIR}.")
+    if not_found_in_map > 0:
+        print(f"Warning: {not_found_in_map} FASTA filenames were not found in the ID mapping file.")
+    if not_found_in_source > 0:
+        print(f"Warning: {not_found_in_source} corresponding PDB files were not found in the source directory.")
 
 if __name__ == "__main__":
     create_corresponding_pdb_set()
