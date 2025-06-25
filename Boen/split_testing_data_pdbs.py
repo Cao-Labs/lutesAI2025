@@ -23,15 +23,20 @@ def get_uniprot_id_from_fasta(filepath):
     """
     try:
         with open(filepath, 'r') as f:
-            header = f.readline()
+            # Use .strip() to remove leading/trailing whitespace and newlines
+            header = f.readline().strip()
             if header.startswith('>'):
                 # The UniProt ID is typically the second item when split by '|'
                 parts = header.split('|')
                 if len(parts) > 1:
-                    return parts[1]
+                    uniprot_id = parts[1]
+                    # Add a simple validation check for what a UniProt ID looks like
+                    # It allows for hyphens in isoform IDs (e.g., P12345-1)
+                    if (6 <= len(uniprot_id) <= 11) and uniprot_id.replace('-', '').isalnum():
+                        return uniprot_id
     except Exception as e:
         # This will report if a file can't be opened or read
-        print(f"Warning: Could not read or parse header for {os.path.basename(filepath)}. Error: {e}")
+        print(f"Warning: Could not read file {os.path.basename(filepath)}. Error: {e}")
     return None
 
 # --- Main Script ---
@@ -40,7 +45,7 @@ def create_corresponding_pdb_set():
     """
     Finds and copies PDB files that correspond to FASTA files by extracting
     UniProt IDs from the FASTA file headers. Deletes the destination
-    directory if it already exists.
+    directory if it already exists and adds debugging for failed parsing.
     """
     print("--- Starting PDB Set Creation ---")
 
@@ -61,10 +66,9 @@ def create_corresponding_pdb_set():
     # Step 3: Get the list of target PDB filenames by parsing FASTA headers
     print(f"\nParsing FASTA files in {FASTA_DIR} to find target UniProt IDs...")
     target_pdb_filenames = set()
-    unparsed_fasta_files = []
+    failed_parses = []
     
     try:
-        # Get a list of all files ending with .fasta or .fa
         fasta_files = [f for f in os.listdir(FASTA_DIR) if f.endswith(('.fasta', '.fa'))]
         if not fasta_files:
             print(f"Error: No .fasta files found in your FASTA directory: {FASTA_DIR}")
@@ -79,17 +83,32 @@ def create_corresponding_pdb_set():
         uniprot_id = get_uniprot_id_from_fasta(fasta_filepath)
         
         if uniprot_id:
-            # Construct the expected AlphaFold PDB filename from the ID
             pdb_filename = f"AF-{uniprot_id}-F1-model_v4.pdb"
             target_pdb_filenames.add(pdb_filename)
         else:
-            unparsed_fasta_files.append(fasta_filename)
+            # If parsing failed, save the filename to report later
+            failed_parses.append(fasta_filename)
 
-    print(f"Constructed {len(target_pdb_filenames)} target PDB filenames from {len(fasta_files)} FASTA files.")
-    if unparsed_fasta_files:
-        print(f"Warning: Could not extract a UniProt ID from {len(unparsed_fasta_files)} FASTA files.")
+    print(f"Successfully constructed {len(target_pdb_filenames)} target PDB filenames.")
 
-    # Step 4: Get a list of all available PDB files from the source directory
+    # Step 4: Add debugging for any files that could not be parsed
+    if failed_parses:
+        print(f"\n--- DEBUGGING INFORMATION ---")
+        print(f"Warning: Could not extract a valid UniProt ID from {len(failed_parses)} FASTA files.")
+        print("This is likely because the FASTA header format is not what the script expects (e.g., >sp|ID|...).")
+        print("Here are the headers from the first 5 files that failed to parse:")
+        
+        for filename in failed_parses[:5]:
+            filepath = os.path.join(FASTA_DIR, filename)
+            try:
+                with open(filepath, 'r') as f:
+                    header = f.readline().strip()
+                    print(f"  - File: {filename}, Header: {header}")
+            except Exception as e:
+                print(f"  - Could not read header from {filename}. Error: {e}")
+        print("-----------------------------\n")
+
+    # Step 5: Get a list of all available PDB files from the source directory
     try:
         available_pdb_files = {f for f in os.listdir(SRC_PDB_DIR) if f.endswith('.pdb')}
         print(f"Found {len(available_pdb_files)} PDB files in the source directory.")
@@ -97,12 +116,12 @@ def create_corresponding_pdb_set():
         print(f"Error: Source PDB directory not found at {SRC_PDB_DIR}")
         return
 
-    # Step 5: Find the intersection of target files and available files
+    # Step 6: Find the intersection of target files and available files
     pdbs_to_copy = target_pdb_filenames.intersection(available_pdb_files)
     missing_pdbs = target_pdb_filenames.difference(available_pdb_files)
     print(f"Found {len(pdbs_to_copy)} matching PDB files to copy.")
 
-    # Step 6: Copy the matching files
+    # Step 7: Copy the matching files
     copied_count = 0
     for pdb_filename in pdbs_to_copy:
         src_path = os.path.join(SRC_PDB_DIR, pdb_filename)
@@ -117,15 +136,9 @@ def create_corresponding_pdb_set():
     print(f"\n--- PDB Set Creation Complete ---")
     print(f"Successfully copied {copied_count} files to {DEST_PDB_DIR}.")
 
-    # Step 7: Report any target PDBs that were not found in the source directory
+    # Step 8: Report any target PDBs that were not found in the source directory
     if missing_pdbs:
         print(f"\nWarning: Could not find {len(missing_pdbs)} corresponding PDB files in {SRC_PDB_DIR}.")
-        # To see a list of missing files, you can uncomment the next lines
-        # print("List of missing PDBs (first 10):")
-        # for pdb_name in sorted(list(missing_pdbs))[:10]:
-        #     print(f"  - {pdb_name}")
-        # if len(missing_pdbs) > 10:
-        #     print("  ...")
 
 if __name__ == "__main__":
     create_corresponding_pdb_set()
