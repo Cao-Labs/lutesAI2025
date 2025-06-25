@@ -29,7 +29,8 @@ def run_predictions(test_path, state_path, batch_size=64, layer=48, nums=None, d
 
     all_preds = []
     with torch.no_grad():
-        for data, _ in test_dataloader:  # Ignoring labels
+        for i, (data, _) in enumerate(test_dataloader):  # Ignoring labels
+            print(f"Batch {i} - Input shape: {data.shape}")  # 👈 Debug line added
             data = data.to(device)
             predictions = model(data)
             all_preds.extend(predictions.cpu().numpy())
@@ -59,3 +60,4 @@ if __name__ == '__main__':
         nums=args.nums,
         device=torch.device(args.device)
     )
+
