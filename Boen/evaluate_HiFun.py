@@ -1,11 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Custom HiFun prediction script for protein function prediction
-Modified to run on specific FASTA file and output to specified directory.
-
-*** CORRECTION: This version saves ALL predictions to the evaluation file,
-*** without any pre-filtering, to ensure the evaluation script has
-*** complete data and can calculate recall correctly.
+Custom HiFun prediction script for protein function prediction.
+MODIFIED to iterate through a directory of individual FASTA files and use the
+filename as the protein ID to ensure consistency with the ground truth generation script.
 """
 import os
 import sys
@@ -33,54 +30,28 @@ os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices'
 
 def predict_protein_functions():
     """
-    Run HiFun predictions on testing_sequences.fasta
+    Run HiFun predictions by iterating through a directory of FASTA files.
     """
-    # File paths
-    input_fasta = '/data/summer2020/Boen/benchmark_testing_sequences.fasta'
+    # --- Paths are updated to point to the directory of individual FASTA files ---
+    input_fasta_dir = '/data/summer2020/Boen/benchmark_testing_sequences'
     output_dir = '/data/summer2020/Boen/hifun_predictions'
     hifun_dir = '/data/shared/tools/HiFun'
     
-    # Clean the output directory to ensure a fresh start
+    # Clean and create the output directory
     logger.info(f"Preparing a clean output directory at: {output_dir}")
     if os.path.exists(output_dir):
-        logger.warning("Output directory exists. Removing it to ensure a clean run.")
         shutil.rmtree(output_dir)
-    
-    # Create the fresh output directory
     os.makedirs(output_dir)
     logger.info("Output directory created.")
     
-    # Change to HiFun directory to access relative paths
     original_dir = os.getcwd()
     os.chdir(hifun_dir)
     
     try:
-        logger.info(f"Loading proteins from: {input_fasta}")
-        
-        # Check if input file exists
-        if not os.path.exists(input_fasta):
-            raise FileNotFoundError(f"Input FASTA file not found: {input_fasta}")
-        
-        # Load query proteins
-        protein_id, protein_seq, protein_len = load_fasta(input_fasta)
-        logger.info(f"Loaded {len(protein_id)} proteins")
-        
-        # Load pre-built models and data
+        # Load model components once before the loop
         logger.info("Loading model components...")
-        
-        required_files = [
-            'db/goterms_level34.pkl', 'db/word_index.npy', 'models/hifun_mode.h5'
-        ]
-        
-        for file_path in required_files:
-            if not os.path.exists(file_path):
-                raise FileNotFoundError(f"Required file not found: {file_path}")
-        
-        # Load model components
         label_index = pd.read_pickle('db/goterms_level34.pkl')
         word_index = np.load('db/word_index.npy', allow_pickle=True).item()
-        
-        logger.info("Loading trained model...")
         model = load_model('models/hifun_mode.h5',
                           custom_objects={
                               'SeqSelfAttention': SeqSelfAttention,
@@ -88,30 +59,45 @@ def predict_protein_functions():
                               'multi_category_focal_loss2_fixed': focal_loss(gamma=2., alpha=.25)
                           })
         
-        # Generate embedding matrices
-        logger.info("Generating protein embeddings...")
-        blosum_mat = blosum_embedding(protein_seq)
-        word2vec_mat = word2vec_embedding(protein_seq, word_index, trim_len=1000)
-        
-        logger.info("Running predictions...")
-        # Make predictions
-        predict_probs = model.predict([word2vec_mat, blosum_mat], verbose=1)
-        
-        # --- Save results in the "long" format for the evaluation script ---
+        # Prepare the output file
         eval_output_file = os.path.join(output_dir, 'predictions_for_eval.txt')
-        logger.info(f"Saving ALL predictions in evaluation format to: {eval_output_file}")
-        
+        logger.info(f"Saving ALL predictions to: {eval_output_file}")
+
         with open(eval_output_file, 'w') as f:
             f.write("AUTHOR G_Gemini\nMODEL 1\nKEYWORDS deep learning\n")
-            # Iterate through each protein and its prediction scores
-            for i, prot_id in enumerate(protein_id):
-                probs = predict_probs[i]
+
+            # --- Main Change: Loop through each FASTA file in the directory ---
+            fasta_files = sorted([f for f in os.listdir(input_fasta_dir) if f.endswith(".fasta")])
+            logger.info(f"Found {len(fasta_files)} FASTA files to process.")
+
+            for i, filename in enumerate(fasta_files):
+                logger.info(f"Processing file {i+1}/{len(fasta_files)}: {filename}")
+                
+                # --- Get protein ID from the filename ---
+                prot_id_from_filename = os.path.splitext(filename)[0]
+                
+                # Load the single protein sequence from its file
+                fasta_path = os.path.join(input_fasta_dir, filename)
+                _, protein_seq, _ = load_fasta(fasta_path)
+                
+                if not protein_seq:
+                    logger.warning(f"Could not load sequence from {filename}. Skipping.")
+                    continue
+
+                # Generate embeddings for the single protein
+                blosum_mat = blosum_embedding(protein_seq)
+                word2vec_mat = word2vec_embedding(protein_seq, word_index, trim_len=1000)
+                
+                # Make predictions for this protein
+                predict_probs = model.predict([word2vec_mat, blosum_mat], verbose=0)
+                
+                # Iterate through prediction scores and write to file
+                probs_for_protein = predict_probs[0] # The result is a list containing one array
                 for j, go_term in enumerate(label_index['terms']):
-                    score = probs[j]
-                    # --- FIX ---
-                    # Write ALL predictions, no matter how low the score.
-                    # The evaluation script will handle the thresholding.
-                    f.write(f"{prot_id}\t{go_term}\t{score:.5f}\n")
+                    score = probs_for_protein[j]
+                    # Use the ID from the filename for consistency
+                    f.write(f"{prot_id_from_filename}\t{go_term}\t{score:.5f}\n")
+            
             f.write("END\n")
 
         logger.info("Evaluation format file saved.")
@@ -120,7 +106,6 @@ def predict_protein_functions():
         logger.error(f"Error during prediction: {str(e)}")
         raise
     finally:
-        # Return to original directory
         os.chdir(original_dir)
 
 def main():

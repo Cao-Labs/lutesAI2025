@@ -1,3 +1,14 @@
+# -*- coding: utf-8 -*-
+"""
+  Author: Dr. Renzhi Cao
+  Written: 1/1/2020
+  Modified by G_Gemini: 6/25/2025 
+  Purpose: To perform a standard, propagated Gene Ontology evaluation for protein function predictions.
+
+  This script calculates precision and recall for predicted GO terms against a ground truth set.
+  It correctly handles the GO hierarchy by propagating annotations up to the root before comparison,
+  which is the standard methodology for CAFA and other bioinformatics benchmarks.
+"""
 from GeneOntologyTree import *
 import sys
 import os
@@ -6,241 +17,187 @@ from os.path import isfile, join
 from os import listdir
 import operator
 
-"""
-  Author: Dr. Renzhi Cao
-  Written: 1/1/2020
-  Any questions, please email: caora@plu.edu
-
-This simple class is going to save all true functions for each target in CAFA, we load the groundtruth from CAFA released files
-"""
 class TrueProteinFunction:
-    AllTrueGO = dict()
-    BPTrueGO = dict()
-    MFTrueGO = dict()
-    CCTrueGO = dict()
-    def __init__(self, pathGroundTruth, TestMode = 1 ):
+    """
+    This class loads and manages the ground truth GO annotations from standard CAFA-formatted files.
+    """
+    def __init__(self, pathGroundTruth, TestMode=0):
+        self.AllTrueGO = dict()
+        self.BPTrueGO = dict()
+        self.MFTrueGO = dict()
+        self.CCTrueGO = dict()
         self.TestMode = TestMode
-        # we consider import from a folder or simply from a file
-        if os.path.isdir(pathGroundTruth):  # we have three files for each category
-            BPPath = pathGroundTruth+"/leafonly_BPO_unique.txt"
-            CCPath = pathGroundTruth+"/leafonly_CCO_unique.txt"
-            MFPath = pathGroundTruth+"/leafonly_MFO_unique.txt"
-            if (not os.path.isfile(BPPath)) or (not os.path.isfile(CCPath)) or (not os.path.isfile(MFPath)):
-                print("Error, cannot load the true GO terms, not existing "+str(BPPath)+" or "+str(CCPath)+" or "+str(MFPath))
-                sys.exit(0)
+        
+        if os.path.isdir(pathGroundTruth):
+            # Assumes a directory with specific files for each ontology branch
+            BPPath = os.path.join(pathGroundTruth, "leafonly_BPO_unique.txt")
+            CCPath = os.path.join(pathGroundTruth, "leafonly_CCO_unique.txt")
+            MFPath = os.path.join(pathGroundTruth, "leafonly_MFO_unique.txt")
+            if not all(os.path.isfile(p) for p in [BPPath, CCPath, MFPath]):
+                print(f"Error: One or more required ground truth files not found in {pathGroundTruth}")
+                sys.exit(1)
             self.loadFile(BPPath, "BP")
             self.loadFile(CCPath, "CC")
             self.loadFile(MFPath, "MF")
-
         else:
             if not os.path.isfile(pathGroundTruth):
-                print("Error, cannot load true GO terms from " + str(pathGroundTruth))
-                sys.exit(0)
+                print(f"Error: Cannot load true GO terms from {pathGroundTruth}")
+                sys.exit(1)
             self.loadFile(pathGroundTruth, "ALL")
 
-    """
-        This function is going to load true GO terms file
-    """
     def loadFile(self, GOpath, GOtype):
-        self.PrintMessage("Loading file "+str(GOpath))
-        with open(GOpath,"r") as fh:
+        self.PrintMessage(f"Loading ground truth file: {GOpath}")
+        with open(GOpath, "r") as fh:
             for line in fh:
-                tem = line.split()
-                if len(tem)<2:
-                    print("Warning, what is "+ str(line))
+                tem = line.strip().split()
+                if len(tem) < 2:
+                    self.PrintMessage(f"Warning: Skipping malformed line: {line.strip()}")
                     continue
-                protein_id = tem[0]
-                go_term = tem[1]
+                protein_id, go_term = tem[0], tem[1]
+
+                # Add to specific ontology dictionary
                 if GOtype == "BP":
-                    if protein_id not in self.BPTrueGO:
-                        self.BPTrueGO[protein_id] = []
+                    if protein_id not in self.BPTrueGO: self.BPTrueGO[protein_id] = []
                     self.BPTrueGO[protein_id].append(go_term)
                 elif GOtype == "CC":
-                    if protein_id not in self.CCTrueGO:
-                        self.CCTrueGO[protein_id] = []
+                    if protein_id not in self.CCTrueGO: self.CCTrueGO[protein_id] = []
                     self.CCTrueGO[protein_id].append(go_term)
                 elif GOtype == "MF":
-                    if protein_id not in self.MFTrueGO:
-                        self.MFTrueGO[protein_id] = []
+                    if protein_id not in self.MFTrueGO: self.MFTrueGO[protein_id] = []
                     self.MFTrueGO[protein_id].append(go_term)
-                # anyhow, we will add GO terms to all dictionary
-                if protein_id not in self.AllTrueGO:
-                    self.AllTrueGO[protein_id] = []
+
+                # Always add to the master dictionary
+                if protein_id not in self.AllTrueGO: self.AllTrueGO[protein_id] = []
                 self.AllTrueGO[protein_id].append(go_term)
 
-    """
-        This function is going to return true GO terms
-    """
     def GetGroundTruth(self, GOtype):
-        if GOtype == "BP":
-            return self.BPTrueGO
-        elif GOtype == "CC":
-            return self.CCTrueGO
-        elif GOtype == "MF":
-            return self.MFTrueGO
-        else:
-            return self.AllTrueGO
+        if GOtype == "BP": return self.BPTrueGO
+        if GOtype == "CC": return self.CCTrueGO
+        if GOtype == "MF": return self.MFTrueGO
+        return self.AllTrueGO
 
-    def PrintMessage(self,Mess):       # when you are testing mode, you can get these messages
+    def PrintMessage(self, Mess):
         if self.TestMode == 1:
             print(Mess)
 
 
-"""
-This simple class is going to process predicted GO functions
-"""
 class PredictedProteinFunction:
-    AllPredictedGO = dict()         # load all predicted GO terms. Key is target name, value is a dictionary, each value is a list. [ (GO, score), ... ]
-    AllPredictedGORanked = dict()         # load all predicted GO terms. Key is target name, value is a dictionary, each value is a list. [ (GO, rank), ... ]
-    def __init__(self, pathGeneOntology, pathPredictions, TestMode = 1, CategoryBased = "ALL"):          # you may need to assign BP, MF, CC to CategoryBased if you only want to consider specific category of GO terms
+    """
+    This class loads and processes predicted GO annotations, filters them by category,
+    and provides methods to retrieve predictions based on confidence score or rank.
+    """
+    def __init__(self, pathGeneOntology, pathPredictions, TestMode=0, CategoryBased="ALL"):
+        self.AllPredictedGO = {}
+        self.AllPredictedGORanked = {}
         self.TestMode = TestMode
-        if CategoryBased.lower() in ("mf", "molecular_function"):
-            CategoryBased = "molecular_function"
-        elif CategoryBased.lower() in ("bp", "biological_process"):
-            CategoryBased = "biological_process"
-        elif CategoryBased.lower() in ("cc", "cellular_component"):
-            CategoryBased = "cellular_component"
-        else:
-            if CategoryBased != "ALL":
-                print("Warning, don't recognize "+str(CategoryBased))
-                print("Set it to ALL")
-            CategoryBased = "ALL"
+        self.GOTree = GeneOntologyTree(pathGeneOntology, TestMode=0)
 
-        self.category = CategoryBased
-        self.GOTree = GeneOntologyTree(pathGeneOntology,TestMode=0)
-        if os.path.isdir(pathPredictions):  # we have folders for all categories
+        # Normalize the category name for robust filtering
+        cat_lower = CategoryBased.lower()
+        if cat_lower in ("mf", "molecular_function"):
+            self.category = "molecular_function"
+        elif cat_lower in ("bp", "biological_process"):
+            self.category = "biological_process"
+        elif cat_lower in ("cc", "cellular_component"):
+            self.category = "cellular_component"
+        else:
+            if cat_lower != "all":
+                print(f"Warning: Did not recognize category '{CategoryBased}'. Defaulting to 'ALL'.")
+            self.category = "ALL"
+        
+        # Load predictions from a single file or a directory of files
+        if os.path.isdir(pathPredictions):
             self.loadFolders(pathPredictions)
         else:
             self.loadFile(pathPredictions)
 
-        self._RankAllGOterms()       # we will simply process AllPredictedGO and get AllPredictedGORanked
+        self._RankAllGOterms()
 
-    def loadFile(self,input):
-        with open(input,'r') as fh:
+    def loadFile(self, input_path):
+        self.PrintMessage(f"Loading prediction file: {input_path}")
+        with open(input_path, 'r') as fh:
             for line in fh:
-                tem = line.split()
-                if len(tem)<3:
-                    self.PrintMessage("Skip "+str(line))
-                    continue
-                if tem[0] == "AUTHOR" or tem[0] == "MODEL" or tem[0] == "KEYWORDS":
-                    continue
-                if self.category != "ALL":     # you only want to consider specific GO category
-                    thecategory = self.GOTree.GetGONameSpace(tem[1])
-                    if thecategory!= self.category:
-                        continue
-                if tem[0] not in self.AllPredictedGO:
-                    self.AllPredictedGO[tem[0]] = []
-                self.AllPredictedGO[tem[0]].append((tem[1],tem[2]))
+                tem = line.strip().split()
+                if len(tem) < 3: continue
+                if tem[0] in ("AUTHOR", "MODEL", "KEYWORDS", "END"): continue
+                
+                prot_id, go_term, score = tem[0], tem[1], tem[2]
 
-    def loadFolders(self,inputFolder):
-        onlyfiles = [join(inputFolder,f) for f in listdir(inputFolder) if isfile(join(inputFolder, f))]
+                # Filter by GO namespace if a specific category is requested
+                if self.category != "ALL":
+                    namespace = self.GOTree.GetGONameSpace(go_term)
+                    if namespace != self.category:
+                        continue
+                
+                if prot_id not in self.AllPredictedGO: self.AllPredictedGO[prot_id] = []
+                self.AllPredictedGO[prot_id].append((go_term, score))
+
+    def loadFolders(self, inputFolder):
+        onlyfiles = [join(inputFolder, f) for f in listdir(inputFolder) if isfile(join(inputFolder, f))]
         for eachfile in onlyfiles:
             self.loadFile(eachfile)
 
-    def GetGOFromTarget(self, targetname):
-        if targetname in self.AllPredictedGO:
-            return self.AllPredictedGO[targetname]
-        else:
-            return None
+    def _RankAllGOterms(self):
+        for targetname, predictions in self.AllPredictedGO.items():
+            # Use a dict to handle duplicate GO terms, keeping the highest score
+            temHash = {}
+            for go_term, score in predictions:
+                score = float(score)
+                if go_term not in temHash or score > temHash[go_term]:
+                    temHash[go_term] = score
+            
+            # Rank the unique GO terms by score
+            sorted_x = sorted(temHash.items(), key=operator.itemgetter(1), reverse=True)
+            
+            # Assign ranks, handling ties by giving them the same average rank
+            RankedGO = {}
+            SameValueGO = {}
+            rank = 1
+            for go_term, score in sorted_x:
+                RankedGO[go_term] = rank
+                if score not in SameValueGO: SameValueGO[score] = []
+                SameValueGO[score].append(go_term)
+                rank += 1
+            
+            for score, go_list in SameValueGO.items():
+                if len(go_list) > 1:
+                    avg_rank = sum(RankedGO[go] for go in go_list) / len(go_list)
+                    for go in go_list:
+                        RankedGO[go] = avg_rank
+            
+            self.AllPredictedGORanked[targetname] = list(RankedGO.items())
 
-    def PrintMessage(self,Mess):       # when you are testing mode, you can get these messages
+    def GetPredictedGO_threshold(self, threshold):
+        ThreGO = {}
+        for prot_id, predictions in self.AllPredictedGO.items():
+            for go_term, score in predictions:
+                if float(score) >= threshold:
+                    if prot_id not in ThreGO: ThreGO[prot_id] = []
+                    ThreGO[prot_id].append(go_term)
+        return ThreGO
+
+    def GetPredictedGO_topn(self, topn):
+        TopnGO = {}
+        if int(topn) <= 0:
+            print(f"Error: Top-N must be a positive integer, not {topn}")
+            sys.exit(1)
+        
+        for prot_id, ranked_preds in self.AllPredictedGORanked.items():
+            for go_term, rank in ranked_preds:
+                if rank <= topn:
+                    if prot_id not in TopnGO: TopnGO[prot_id] = []
+                    TopnGO[prot_id].append(go_term)
+        return TopnGO
+
+    def PrintMessage(self, Mess):
         if self.TestMode == 1:
             print(Mess)
 
-    def _RankAllGOterms(self):        # this function is going to rank all GO terms and create a ranked list
-        for targetname in self.AllPredictedGO:
-            originalGOlist = self.AllPredictedGO[targetname]            # a list : [(GO,score)...]
-            temHash = dict()
-            for eachpair in originalGOlist:
-                if eachpair[0] not in temHash:
-                    temHash[eachpair[0]] = float(eachpair[1])
-            # first rank them by scores
-            sorted_x = sorted(temHash.items(), key=operator.itemgetter(1), reverse = True)
-            myrank = 1
-            RankedGO = dict()
-            SameValueGO = dict()       # key is score, value is list of GO with the same score
-            for i in range(len(sorted_x)):
-                RankedGO[sorted_x[i][0]] = myrank
-                if sorted_x[i][1] not in SameValueGO:
-                    SameValueGO[sorted_x[i][1]] = []
-                SameValueGO[sorted_x[i][1]].append(sorted_x[i][0])
-                myrank+=1
-            # now update the rank, for the GOs with same score, give the average rank for them
-            for each in SameValueGO:
-                listGOs = SameValueGO[each]
-                if len(listGOs)>1:
-                    averageRank = 0
-                    for eachGO in listGOs:
-                        averageRank+=RankedGO[eachGO]
-                    averageRank/=float(len(listGOs))
-                    for eachGO in listGOs:
-                        RankedGO[eachGO] = averageRank
-            # now build the new GO list with ranking
-            rankedGOlist = []
-            for each in RankedGO:
-                rankedGOlist.append((each,RankedGO[each]))
-            self.AllPredictedGORanked[targetname] = rankedGOlist
-
-    """
-       THis function is used to analyze GO terms by selecting a threshold to filter all GO terms. Only return the dictionary and for each target, the GO terms larger or equal to threshold will be kept
-    """
-    def GetPredictedGO_threshold(self, threshold):
-        ThreGO = dict()      # a new dictionary for results
-        for each in self.AllPredictedGO:
-            TargetGO = self.AllPredictedGO[each]
-            for GOInfor in TargetGO:
-                if float(GOInfor[1]) >= float(threshold):
-                    if each not in ThreGO:
-                        ThreGO[each] = []
-                    ThreGO[each].append(GOInfor[0])
-        return ThreGO
-
-    """
-       THis function is used to analyze GO terms by selecting top n to filter all GO terms. Only return the dictionary and for each target, the GO terms rank higher than the rank will be kept
-    """
-    def GetPredictedGO_topn(self, topn):
-        TopnGO = dict()        # keep top n GOs
-        topn = int(topn)
-        if topn <= 0:
-            print("Error, cannot select top n with this number n:"+str(topn))
-            sys.exit(0)
-
-        for targetname in self.AllPredictedGORanked:
-            TargetGO = self.AllPredictedGORanked[targetname]
-            for GOInfor in TargetGO:
-                if float(GOInfor[1]) <= float(topn):
-                    if targetname not in TopnGO:
-                        TopnGO[targetname] = []
-                    TopnGO[targetname].append(GOInfor[0])
-        return TopnGO
-
-def calculate_precision_recall(predicted_list, true_list):
-    """
-    Calculates precision and recall based on two lists of GO terms.
-    This implementation uses simple set intersection and does not account for GO hierarchy.
-    """
-    predicted_set = set(predicted_list)
-    true_set = set(true_list)
-
-    if not true_set and not predicted_set:
-        return 1.0, 1.0 # By convention, if both sets are empty
-    if not predicted_set:
-        return 0.0, 0.0 # No predictions means 0 precision
-    if not true_set:
-        return 0.0, 0.0 # No true terms, can't calculate recall meaningfully for most cases
-        
-    true_positives = len(predicted_set.intersection(true_set))
-    
-    precision = float(true_positives) / len(predicted_set)
-    recall = float(true_positives) / len(true_set)
-    
-    return precision, recall
 
 def main():
     if len(sys.argv) < 5:
-        print("This script is going to do analysis of GO terms using precision and recall.")
-        print("We use CAFA official benchmark true GO terms folder (leafonly_BPO_unique.txt, leafonly_CCO_unique.txt, leafonly_MFO_unique.txt), and your CAFA predictions folder(like CaoLab4_1_273057.txt), output folder to save results")
-
+        print("Usage: python evaluation_metrics.py <path_to_obo> <path_to_ground_truth> <path_to_predictions> <path_to_output_dir>")
+        print("This script performs a propagated evaluation of GO terms using precision and recall.")
         showExample()
         sys.exit(0)
 
@@ -252,196 +209,118 @@ def main():
     if not os.path.exists(dir_output):
         os.makedirs(dir_output)
 
+    # The GeneOntologyTree is instantiated once and provides the evaluation logic
+    GOTree = GeneOntologyTree(goTreePath, TestMode=0)
+
+    # Load ground truth and predictions for each category
     TrueGO = TrueProteinFunction(dir_truePath)
-    PredictedGO_BP = PredictedProteinFunction(goTreePath, dir_predictPath, TestMode=0, CategoryBased="BP")
     ListedTrue_BP = TrueGO.GetGroundTruth('BP')
-    PredictedGO_MF = PredictedProteinFunction(goTreePath, dir_predictPath, TestMode=0, CategoryBased="MF")
     ListedTrue_MF = TrueGO.GetGroundTruth('MF')
-    PredictedGO_CC = PredictedProteinFunction(goTreePath, dir_predictPath, TestMode=0, CategoryBased="CC")
     ListedTrue_CC = TrueGO.GetGroundTruth('CC')
-    PredictedGO_ALL = PredictedProteinFunction(goTreePath, dir_predictPath, TestMode=0, CategoryBased="ALL")
     ListedTrue_ALL = TrueGO.GetGroundTruth('ALL')
-
-    fhThresholdBP = open(dir_output + "/Threshold_BP.txt", 'w')
-    fhThresholdMF = open(dir_output + "/Threshold_MF.txt", 'w')
-    fhThresholdCC = open(dir_output + "/Threshold_CC.txt", 'w')
-    fhThresholdALL = open(dir_output + "/Threshold_ALL.txt", 'w')
-
-    # Write headers to output files
-    fhThresholdBP.write("Threshold\tPrecision\tRecall\n")
-    fhThresholdMF.write("Threshold\tPrecision\tRecall\n")
-    fhThresholdCC.write("Threshold\tPrecision\tRecall\n")
-    fhThresholdALL.write("Threshold\tPrecision\tRecall\n")
-
-    threshBP, threshMF, threshCC, threshALL = [], [], [], []
     
-    # 2 threshold based analysis
+    PredictedGO_BP = PredictedProteinFunction(goTreePath, dir_predictPath, CategoryBased="BP")
+    PredictedGO_MF = PredictedProteinFunction(goTreePath, dir_predictPath, CategoryBased="MF")
+    PredictedGO_CC = PredictedProteinFunction(goTreePath, dir_predictPath, CategoryBased="CC")
+    PredictedGO_ALL = PredictedProteinFunction(goTreePath, dir_predictPath, CategoryBased="ALL")
+
+    # --- Threshold-based Propagated Analysis ---
+    print("\n--- Starting Threshold-based Propagated Evaluation ---")
+    output_files_thresh = {
+        "BP": open(os.path.join(dir_output, "Threshold_BP_propagated.txt"), 'w'),
+        "MF": open(os.path.join(dir_output, "Threshold_MF_propagated.txt"), 'w'),
+        "CC": open(os.path.join(dir_output, "Threshold_CC_propagated.txt"), 'w'),
+        "ALL": open(os.path.join(dir_output, "Threshold_ALL_propagated.txt"), 'w')
+    }
+    for f in output_files_thresh.values():
+        f.write("Threshold\tPrecision\tRecall\n")
+
     for thres in [x * 0.01 for x in range(0, 101)]:
-        overallPrecisionBP, overallRecallBP = 0.0, 0.0
-        overallPrecisionMF, overallRecallMF = 0.0, 0.0
-        overallPrecisionCC, overallRecallCC = 0.0, 0.0
-        overallPrecisionALL, overallRecallALL = 0.0, 0.0
+        metrics = {cat: {'p_sum': 0.0, 'r_sum': 0.0, 'count': 0} for cat in ["BP", "MF", "CC", "ALL"]}
         
-        index_BP, index_CC, index_MF, index_ALL = 0, 0, 0, 0
+        predictions_thresh = {
+            "BP": PredictedGO_BP.GetPredictedGO_threshold(thres),
+            "MF": PredictedGO_MF.GetPredictedGO_threshold(thres),
+            "CC": PredictedGO_CC.GetPredictedGO_threshold(thres),
+            "ALL": PredictedGO_ALL.GetPredictedGO_threshold(thres)
+        }
+        
+        true_sets = {"BP": ListedTrue_BP, "MF": ListedTrue_MF, "CC": ListedTrue_CC, "ALL": ListedTrue_ALL}
 
-        Threshold_predicted_BP = PredictedGO_BP.GetPredictedGO_threshold(thres)
-        Threshold_predicted_MF = PredictedGO_MF.GetPredictedGO_threshold(thres)
-        Threshold_predicted_CC = PredictedGO_CC.GetPredictedGO_threshold(thres)
-        Threshold_predicted_ALL = PredictedGO_ALL.GetPredictedGO_threshold(thres)
+        for target in true_sets["ALL"]:
+            for cat in ["BP", "MF", "CC", "ALL"]:
+                if target in predictions_thresh[cat] and target in true_sets[cat]:
+                    precision, recall = GOTree.GOSetsPropagate(
+                        predictions_thresh[cat][target],
+                        true_sets[cat][target]
+                    )
+                    if precision >= 0 and recall >= 0:
+                        metrics[cat]['p_sum'] += precision
+                        metrics[cat]['r_sum'] += recall
+                        metrics[cat]['count'] += 1
+        
+        print(f"Threshold {thres:.2f} | Evaluated (BP,MF,CC,ALL): {metrics['BP']['count']},{metrics['MF']['count']},{metrics['CC']['count']},{metrics['ALL']['count']}")
 
-        for targetname in ListedTrue_ALL:
-            if targetname in Threshold_predicted_BP:
-                if targetname in ListedTrue_BP and len(ListedTrue_BP[targetname]) > 0:
-                    precision, recall = calculate_precision_recall(Threshold_predicted_BP[targetname], ListedTrue_BP[targetname])
-                    overallPrecisionBP += precision
-                    overallRecallBP += recall
-                    index_BP += 1
-            else:
-                print("Warning, missing target for BP: " + str(targetname))
+        for cat, data in metrics.items():
+            if data['count'] > 0:
+                avg_p = data['p_sum'] / data['count']
+                avg_r = data['r_sum'] / data['count']
+                output_files_thresh[cat].write(f"{thres:.2f}\t{avg_p:.5f}\t{avg_r:.5f}\n")
 
-            if targetname in Threshold_predicted_MF:
-                if targetname in ListedTrue_MF and len(ListedTrue_MF[targetname]) > 0:
-                    precision, recall = calculate_precision_recall(Threshold_predicted_MF[targetname], ListedTrue_MF[targetname])
-                    overallPrecisionMF += precision
-                    overallRecallMF += recall
-                    index_MF += 1
-            else:
-                print("Warning, missing target for MF: " + str(targetname))
+    for f in output_files_thresh.values(): f.close()
 
-            if targetname in Threshold_predicted_CC:
-                if targetname in ListedTrue_CC and len(ListedTrue_CC[targetname]) > 0:
-                    precision, recall = calculate_precision_recall(Threshold_predicted_CC[targetname], ListedTrue_CC[targetname])
-                    overallPrecisionCC += precision
-                    overallRecallCC += recall
-                    index_CC += 1
-            else:
-                print("Warning, missing target for CC: " + str(targetname))
+    # --- Top-N based Propagated Analysis ---
+    print("\n--- Starting Top-N-based Propagated Evaluation ---")
+    output_files_topn = {
+        "BP": open(os.path.join(dir_output, "TopN_BP_propagated.txt"), 'w'),
+        "MF": open(os.path.join(dir_output, "TopN_MF_propagated.txt"), 'w'),
+        "CC": open(os.path.join(dir_output, "TopN_CC_propagated.txt"), 'w'),
+        "ALL": open(os.path.join(dir_output, "TopN_ALL_propagated.txt"), 'w')
+    }
+    for f in output_files_topn.values():
+        f.write("TopN\tPrecision\tRecall\n")
 
-            if targetname in Threshold_predicted_ALL:
-                if targetname in ListedTrue_ALL and len(ListedTrue_ALL[targetname]) > 0:
-                    precision, recall = calculate_precision_recall(Threshold_predicted_ALL[targetname], ListedTrue_ALL[targetname])
-                    overallPrecisionALL += precision
-                    overallRecallALL += recall
-                    index_ALL += 1
-            else:
-                print("Warning, missing target for ALL: " + str(targetname))
+    for topn in range(1, 21):
+        metrics = {cat: {'p_sum': 0.0, 'r_sum': 0.0, 'count': 0} for cat in ["BP", "MF", "CC", "ALL"]}
+        
+        predictions_topn = {
+            "BP": PredictedGO_BP.GetPredictedGO_topn(topn),
+            "MF": PredictedGO_MF.GetPredictedGO_topn(topn),
+            "CC": PredictedGO_CC.GetPredictedGO_topn(topn),
+            "ALL": PredictedGO_ALL.GetPredictedGO_topn(topn)
+        }
+        
+        true_sets = {"BP": ListedTrue_BP, "MF": ListedTrue_MF, "CC": ListedTrue_CC, "ALL": ListedTrue_ALL}
+        
+        for target in true_sets["ALL"]:
+            for cat in ["BP", "MF", "CC", "ALL"]:
+                if target in predictions_topn[cat] and target in true_sets[cat]:
+                    precision, recall = GOTree.GOSetsPropagate(
+                        predictions_topn[cat][target],
+                        true_sets[cat][target]
+                    )
+                    if precision >= 0 and recall >= 0:
+                        metrics[cat]['p_sum'] += precision
+                        metrics[cat]['r_sum'] += recall
+                        metrics[cat]['count'] += 1
 
-        if index_BP != 0:
-            threshBP.append((thres, overallPrecisionBP / index_BP, overallRecallBP / index_BP))
-        if index_MF != 0:
-            threshMF.append((thres, overallPrecisionMF / index_MF, overallRecallMF / index_MF))
-        if index_CC != 0:
-            threshCC.append((thres, overallPrecisionCC / index_CC, overallRecallCC / index_CC))
-        if index_ALL != 0:
-            threshALL.append((thres, overallPrecisionALL / index_ALL, overallRecallALL / index_ALL))
+        print(f"Top {topn} | Evaluated (BP,MF,CC,ALL): {metrics['BP']['count']},{metrics['MF']['count']},{metrics['CC']['count']},{metrics['ALL']['count']}")
 
-        print("For threshold " + str(thres) + ", we evaluated BP, MF, CC, and ALL the following number: " + str(index_BP) + "," + str(index_MF) + "," + str(index_CC) + "," + str(index_ALL))
+        for cat, data in metrics.items():
+            if data['count'] > 0:
+                avg_p = data['p_sum'] / data['count']
+                avg_r = data['r_sum'] / data['count']
+                output_files_topn[cat].write(f"{topn}\t{avg_p:.5f}\t{avg_r:.5f}\n")
+    
+    for f in output_files_topn.values(): f.close()
 
-    for each in threshBP:
-        fhThresholdBP.write(str(each[0]) + "\t" + str(each[1]) + "\t" + str(each[2]) + "\n")
-    for each in threshMF:
-        fhThresholdMF.write(str(each[0]) + "\t" + str(each[1]) + "\t" + str(each[2]) + "\n")
-    for each in threshCC:
-        fhThresholdCC.write(str(each[0]) + "\t" + str(each[1]) + "\t" + str(each[2]) + "\n")
-    for each in threshALL:
-        fhThresholdALL.write(str(each[0]) + "\t" + str(each[1]) + "\t" + str(each[2]) + "\n")
+    print("\nEvaluation complete. Results saved in:", dir_output)
 
-    fhThresholdBP.close()
-    fhThresholdMF.close()
-    fhThresholdCC.close()
-    fhThresholdALL.close()
-
-    fhTopBP = open(dir_output + "/Topn_BP.txt", 'w')
-    fhTopMF = open(dir_output + "/Topn_MF.txt", 'w')
-    fhTopCC = open(dir_output + "/Topn_CC.txt", 'w')
-    fhTopALL = open(dir_output + "/Topn_ALL.txt", 'w')
-
-    # Write headers to top-n files
-    fhTopBP.write("TopN\tPrecision\tRecall\n")
-    fhTopMF.write("TopN\tPrecision\tRecall\n")
-    fhTopCC.write("TopN\tPrecision\tRecall\n")
-    fhTopALL.write("TopN\tPrecision\tRecall\n")
-
-    topnBP, topnMF, topnCC, topnALL = [], [], [], []
-
-    # 3 topn based analysis
-    for topn in [x for x in range(1, 21)]:
-        overallPrecisionBP, overallRecallBP = 0.0, 0.0
-        overallPrecisionMF, overallRecallMF = 0.0, 0.0
-        overallPrecisionCC, overallRecallCC = 0.0, 0.0
-        overallPrecisionALL, overallRecallALL = 0.0, 0.0
-
-        index_BP, index_CC, index_MF, index_ALL = 0, 0, 0, 0
-
-        Top_predicted_BP = PredictedGO_BP.GetPredictedGO_topn(topn)
-        Top_predicted_MF = PredictedGO_MF.GetPredictedGO_topn(topn)
-        Top_predicted_CC = PredictedGO_CC.GetPredictedGO_topn(topn)
-        Top_predicted_ALL = PredictedGO_ALL.GetPredictedGO_topn(topn)
-
-        for targetname in ListedTrue_ALL:
-            if targetname in Top_predicted_BP:
-                if targetname in ListedTrue_BP and len(ListedTrue_BP[targetname]) > 0:
-                    precision, recall = calculate_precision_recall(Top_predicted_BP[targetname], ListedTrue_BP[targetname])
-                    overallPrecisionBP += precision
-                    overallRecallBP += recall
-                    index_BP += 1
-            else:
-                print("Warning, missing target for BP: " + str(targetname))
-            
-            if targetname in Top_predicted_MF:
-                if targetname in ListedTrue_MF and len(ListedTrue_MF[targetname]) > 0:
-                    precision, recall = calculate_precision_recall(Top_predicted_MF[targetname], ListedTrue_MF[targetname])
-                    overallPrecisionMF += precision
-                    overallRecallMF += recall
-                    index_MF += 1
-            else:
-                print("Warning, missing target for MF: " + str(targetname))
-
-            if targetname in Top_predicted_CC:
-                if targetname in ListedTrue_CC and len(ListedTrue_CC[targetname]) > 0:
-                    precision, recall = calculate_precision_recall(Top_predicted_CC[targetname], ListedTrue_CC[targetname])
-                    overallPrecisionCC += precision
-                    overallRecallCC += recall
-                    index_CC += 1
-            else:
-                print("Warning, missing target for CC: " + str(targetname))
-
-            if targetname in Top_predicted_ALL:
-                if targetname in ListedTrue_ALL and len(ListedTrue_ALL[targetname]) > 0:
-                    precision, recall = calculate_precision_recall(Top_predicted_ALL[targetname], ListedTrue_ALL[targetname])
-                    overallPrecisionALL += precision
-                    overallRecallALL += recall
-                    index_ALL += 1
-            else:
-                print("Warning, missing target for ALL: " + str(targetname))
-
-        if index_BP != 0:
-            topnBP.append((topn, overallPrecisionBP / index_BP, overallRecallBP / index_BP))
-        if index_MF != 0:
-            topnMF.append((topn, overallPrecisionMF / index_MF, overallRecallMF / index_MF))
-        if index_CC != 0:
-            topnCC.append((topn, overallPrecisionCC / index_CC, overallRecallCC / index_CC))
-        if index_ALL != 0:
-            topnALL.append((topn, overallPrecisionALL / index_ALL, overallRecallALL / index_ALL))
-            
-        print("For Top " + str(topn) + ", we evaluated BP, MF, CC, and ALL the following number: " + str(index_BP) + "," + str(index_MF) + "," + str(index_CC) + "," + str(index_ALL))
-
-    for each in topnBP:
-        fhTopBP.write(str(each[0]) + "\t" + str(each[1]) + "\t" + str(each[2]) + "\n")
-    for each in topnMF:
-        fhTopMF.write(str(each[0]) + "\t" + str(each[1]) + "\t" + str(each[2]) + "\n")
-    for each in topnCC:
-        fhTopCC.write(str(each[0]) + "\t" + str(each[1]) + "\t" + str(each[2]) + "\n")
-    for each in topnALL:
-        fhTopALL.write(str(each[0]) + "\t" + str(each[1]) + "\t" + str(each[2]) + "\n")
-
-    fhTopBP.close()
-    fhTopMF.close()
-    fhTopCC.close()
-    fhTopALL.close()
 
 def showExample():
-    print("python " + sys.argv[0] + " ../data/gene_ontology_edit.obo.2016-06-01 ../data/Selected10Data/groundtruth ../data/SelectedCaoLabPredictions/ ../result/GOAnalysisResult_PrecisionRecall")
+    print("Example usage:")
+    print("python evaluation_metrics.py ../data/go.obo ../data/groundtruth/ ../data/predictions/ ../results/PropagatedResults")
+
 
 if __name__ == '__main__':
     main()
