@@ -107,7 +107,7 @@ class GOEnv(gym.Env):
         correct = set(selected_terms) & set(self.current_truth)
         incorrect = set(selected_terms) - correct
         incorrectScore = len(incorrect) *.25
-        reward = len(correct)- (incorrectScore)
+        reward = len(correct) - incorrectScore
         # Calculate percentage of correct GO terms guessed
         total_true = len(set(self.current_truth))
         percent_correct = (len(correct) / total_true) * 100 if total_true > 0 else 0.0
