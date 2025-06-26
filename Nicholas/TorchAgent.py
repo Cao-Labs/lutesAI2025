@@ -59,7 +59,9 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
 
     for episode in range(episodes):
         obs = env.reset()
-        sequence = torch.tensor(obs["sequence"], dtype=torch.long).unsqueeze(0)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        policy.to(device)
+        sequence = torch.tensor(obs["sequence"], dtype=torch.long, device=device).unsqueeze(0)
         probs = policy(sequence).squeeze(0)
 
         dist = torch.distributions.Bernoulli(probs)
