@@ -3,7 +3,10 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from transformers import BigBirdForSequenceClassification, BigBirdConfig
+from torch.optim import AdamW
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from collections import defaultdict
+from sklearn.metrics import f1_score
 from tqdm import tqdm
 
 # === Dataset Class ===
@@ -39,9 +42,9 @@ class ProteinFunctionDataset(Dataset):
 
     def __getitem__(self, idx):
         pid = self.ids[idx]
-        embedding = torch.load(os.path.join(self.embedding_dir, f"{pid}.pt"))  # [512, 512]
+        embedding = torch.load(os.path.join(self.embedding_dir, f"{pid}.pt"))  # [L, 512]
 
-        attention_mask = (embedding.sum(dim=1) != 0).long()  # [512]
+        attention_mask = (embedding.sum(dim=1) != 0).long()  # [L]
         target = torch.zeros(self.num_labels)
         for term in self.go_labels.get(pid, []):
             if term in self.go_vocab:
@@ -53,7 +56,7 @@ class ProteinFunctionDataset(Dataset):
 class BigBirdProteinModel(nn.Module):
     def __init__(self, input_dim, target_dim, max_len):
         super().__init__()
-        self.project = nn.Linear(input_dim, 1536)
+        self.project = nn.Linear(input_dim, 1536)  # Make divisible by 8 heads
         config = BigBirdConfig(
             vocab_size=50265,
             hidden_size=1536,
@@ -64,7 +67,7 @@ class BigBirdProteinModel(nn.Module):
             max_position_embeddings=max_len,
             use_bias=True,
             is_decoder=False,
-            num_labels=target_dim
+            num_labels=target_dim,
         )
         self.bigbird = BigBirdForSequenceClassification(config)
         self.bigbird.classifier = nn.Sequential(
@@ -72,7 +75,6 @@ class BigBirdProteinModel(nn.Module):
             nn.ReLU(),
             nn.Linear(512, target_dim)
         )
-        self.bigbird.gradient_checkpointing_enable()  # Proper call for newer Transformers
 
     def forward(self, x, attention_mask):
         x = self.project(x)  # [B, L, 1536]
@@ -81,7 +83,10 @@ class BigBirdProteinModel(nn.Module):
 
 # === Training Function ===
 def train():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # === Device Selection ===
+    device = torch.device("cuda:1" if torch.cuda.device_count() > 1 else "cuda:0")
+
+    # === Training Settings ===
     batch_size = 128
     epochs = 5
     learning_rate = 1e-5
@@ -89,7 +94,7 @@ def train():
     min_lr = 1e-7
 
     dataset = ProteinFunctionDataset(
-        "/data/summer2020/naufal/final_embeddings_pca",  # PCA 512x512 embeddings
+        "/data/summer2020/naufal/final_embeddings_pca",
         "/data/summer2020/naufal/matched_ids_with_go.txt"
     )
 
@@ -97,22 +102,16 @@ def train():
 
     model = BigBirdProteinModel(input_dim=512, target_dim=dataset.num_labels, max_len=512).to(device)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode="min",
-        factor=0.5,
-        patience=patience,
-        threshold=1e-4,
-        min_lr=min_lr
-    )
-
+    optimizer = AdamW(model.parameters(), lr=learning_rate)
+    scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=patience, min_lr=min_lr)
     criterion = nn.BCEWithLogitsLoss()
+
+    print("[✓] Starting training...")
     model.train()
 
     for epoch in range(epochs):
-        print(f"\n[Epoch {epoch + 1}/{epochs}]")
-        epoch_loss = 0.0
+        print(f"\n[Epoch {epoch+1}/{epochs}]")
+        total_loss = 0.0
 
         for i, (x, attn_mask, y) in enumerate(tqdm(dataloader)):
             x, attn_mask, y = x.to(device), attn_mask.to(device), y.to(device)
@@ -123,16 +122,19 @@ def train():
             loss.backward()
             optimizer.step()
 
-            epoch_loss += loss.item()
-            if i == 0 or (i + 1) % 10_000 == 0:
+            total_loss += loss.item()
+
+            if i == 0 or (i + 1) % 10000 == 0:
                 print(f"[✓] Trained {i + 1:,} proteins")
 
-        avg_loss = epoch_loss / len(dataloader)
+        avg_loss = total_loss / len(dataloader)
         print(f"[INFO] Avg Loss: {avg_loss:.4f}")
         scheduler.step(avg_loss)
 
-    torch.save(model.state_dict(), "bigbird_finetuned.pt")
-    print("[✓] Model saved as bigbird_finetuned.pt")
+        torch.save(model.state_dict(), f"bigbird_finetuned_epoch_{epoch+1}.pt")
+        print(f"[✓] Model saved: bigbird_finetuned_epoch_{epoch+1}.pt")
+
+    print("[✓] Training complete.")
 
 if __name__ == "__main__":
     train()
