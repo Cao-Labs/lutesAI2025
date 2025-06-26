@@ -6,6 +6,7 @@ from Bio import SeqIO
 import click as ck
 import time
 import multiprocessing
+import glob
 
 # ==============================================================================
 # --- CONFIGURATION ---
@@ -43,103 +44,89 @@ def update_status(message):
         f.write(f"{now} - {message}\n")
     print(message)
 
-def filter_long_sequences(input_fasta, output_dir, max_length=4000):
-    """
-    Filters a FASTA file to remove sequences longer than a specified limit.
-    This prevents InterProScan from failing on exceptionally long proteins.
-    """
+def filter_long_sequences(input_fasta, output_dir, max_length=3000):
+    """Filters a FASTA file to remove sequences longer than a specified limit."""
     filtered_fasta_path = os.path.join(output_dir, "filtered_sequences.fasta")
     update_status(f"STEP 0: Filtering sequences longer than {max_length} aa from {input_fasta}...")
     
-    short_sequences = []
-    long_sequence_count = 0
-    total_count = 0
-
-    for record in SeqIO.parse(input_fasta, "fasta"):
-        total_count += 1
-        if len(record.seq) <= max_length:
-            short_sequences.append(record)
-        else:
-            long_sequence_count += 1
+    short_sequences = [record for record in SeqIO.parse(input_fasta, "fasta") if len(record.seq) <= max_length]
+    original_count = sum(1 for _ in SeqIO.parse(input_fasta, "fasta"))
+    filtered_count = len(short_sequences)
             
     SeqIO.write(short_sequences, filtered_fasta_path, "fasta")
     
-    if long_sequence_count > 0:
-        update_status(f"STEP 0: Removed {long_sequence_count} sequences longer than {max_length} aa.")
-    update_status(f"STEP 0: Proceeding with {len(short_sequences)} of {total_count} total sequences.")
+    if original_count > filtered_count:
+        update_status(f"STEP 0: Removed {original_count - filtered_count} sequences longer than {max_length} aa.")
+    update_status(f"STEP 0: Proceeding with {filtered_count} of {original_count} total sequences.")
     
     return filtered_fasta_path
 
-def count_fasta_proteins(fasta_file):
-    """Counts the number of sequences in a FASTA file."""
-    try:
-        return sum(1 for _ in SeqIO.parse(fasta_file, "fasta"))
-    except FileNotFoundError:
-        return 0
-
-def monitor_interproscan_progress(tsv_file, total_proteins, status_file_path):
-    """A separate process to monitor the InterProScan output file."""
-    start_time = time.time()
-    while True:
-        time.sleep(60) # Check once every minute
-        if not os.path.exists(tsv_file):
-            continue
-        try:
-            with open(tsv_file, 'r') as f:
-                processed_ids = {line.split('\t')[0] for line in f}
-            
-            processed_count = len(processed_ids)
-            percentage = (processed_count / total_proteins) * 100 if total_proteins > 0 else 0
-            elapsed_time = time.time() - start_time
-            
-            message = (f"STEP 1: InterProScan in progress... "
-                       f"Processed {processed_count}/{total_proteins} proteins ({percentage:.2f}%). "
-                       f"Elapsed time: {elapsed_time/60:.1f} minutes.")
-            
-            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            with open(status_file_path, "w") as f:
-                f.write(f"{now} - {message}\n")
-        except Exception:
-            continue
-
-def run_interproscan(fasta_file, output_tsv, total_proteins):
-    """Executes InterProScan with combined fixes for stability."""
-    update_status("STEP 1: Starting InterProScan analysis (robust mode)...")
+def split_fasta(input_fasta, output_dir, chunk_size=500):
+    """Splits a fasta file into smaller chunks."""
+    update_status(f"STEP 0.5: Splitting FASTA into chunks of {chunk_size}...")
+    chunk_dir = os.path.join(output_dir, "fasta_chunks")
+    os.makedirs(chunk_dir, exist_ok=True)
     
-    # --- COMBINED FIX ---
-    # We are both using the filtered FASTA file AND disabling fragile applications
-    # to give the highest probability of success.
+    record_iter = SeqIO.parse(open(input_fasta), 'fasta')
+    for i, batch in enumerate(batch_iterator(record_iter, chunk_size)):
+        filename = os.path.join(chunk_dir, f"chunk_{i + 1}.fasta")
+        with open(filename, "w") as handle:
+            count = SeqIO.write(batch, handle, "fasta")
+        update_status(f"Generated chunk {i+1} with {count} sequences.")
+    return chunk_dir
+
+def batch_iterator(iterator, batch_size):
+    """Returns lists of length batch_size."""
+    entry = True
+    while entry:
+        batch = []
+        while len(batch) < batch_size:
+            try:
+                entry = next(iterator)
+            except StopIteration:
+                entry = None
+            if entry is None:
+                break
+            batch.append(entry)
+        if batch:
+            yield batch
+
+def run_interproscan_chunk(chunk_path, output_dir, chunk_num):
+    """Executes InterProScan on a single FASTA chunk."""
+    chunk_name = os.path.basename(chunk_path)
+    total_proteins = sum(1 for _ in SeqIO.parse(chunk_path, "fasta"))
+    output_tsv = os.path.join(output_dir, f"{os.path.splitext(chunk_name)[0]}.tsv")
+
+    update_status(f"STEP 1.{chunk_num}: Starting InterProScan for {chunk_name} ({total_proteins} proteins)...")
+    
     cmd = [
-        INTERPROSCAN_PATH,
-        "-i", fasta_file,
-        "-f", "TSV",
-        "-o", output_tsv,
-        "--goterms",
-        "-cpu", CPU_CORES,
-        "--disable-applications", "Coils,Phobius,SignalP"
+        INTERPROSCAN_PATH, "-i", chunk_path, "-f", "TSV", "-o", output_tsv,
+        "--goterms", "-cpu", CPU_CORES, "--disable-applications", "Coils,Phobius,SignalP"
     ]
 
-    monitor = multiprocessing.Process(target=monitor_interproscan_progress, args=(output_tsv, total_proteins, STATUS_FILE))
-    monitor.daemon = True
-    monitor.start()
-
     try:
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        stdout, stderr = process.communicate()
-        if process.returncode != 0:
-            error_message = f"InterProScan failed. STDERR: {stderr}"
-            update_status(f"ERROR: {error_message}")
-            raise subprocess.CalledProcessError(process.returncode, cmd, output=stdout, stderr=stderr)
-        update_status("STEP 1: InterProScan completed successfully.")
-    finally:
-        monitor.terminate()
-        monitor.join()
+        process = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        update_status(f"STEP 1.{chunk_num}: InterProScan completed for {chunk_name}.")
+    except subprocess.CalledProcessError as e:
+        error_message = f"InterProScan failed on chunk {chunk_num} ({chunk_name}). STDERR: {e.stderr}"
+        update_status(f"ERROR: {error_message}")
+        raise e
+    return output_tsv
+
+def merge_tsv_results(chunk_dir, final_tsv_path):
+    """Merges all chunked TSV files into one."""
+    update_status("STEP 1.M: Merging all InterProScan chunk results...")
+    tsv_files = glob.glob(os.path.join(chunk_dir, "*.tsv"))
+    with open(final_tsv_path, 'wb') as outfile:
+        for tsv_file in sorted(tsv_files):
+            with open(tsv_file, 'rb') as infile:
+                outfile.write(infile.read())
+    update_status(f"STEP 1.M: Merged {len(tsv_files)} chunk files into {final_tsv_path}.")
 
 def create_prediction_dataframe(fasta_file, interpro_tsv, output_pkl):
     """Parses InterProScan results and creates the required .pkl file."""
     update_status("STEP 2: Creating Prediction-Ready DataFrame...")
     interpro_map = {}
-    # Use a try-except block in case the TSV file is empty after a failed run
     try:
         with open(interpro_tsv, 'r') as f:
             for line in f:
@@ -152,7 +139,6 @@ def create_prediction_dataframe(fasta_file, interpro_tsv, output_pkl):
     except FileNotFoundError:
         update_status(f"WARNING: InterProScan output file not found at {interpro_tsv}. Cannot create DataFrame.")
         return False
-
 
     protein_ids = [record.id for record in SeqIO.parse(fasta_file, "fasta")]
     interpros_list = [list(interpro_map.get(pid, set())) for pid in protein_ids]
@@ -179,7 +165,7 @@ def run_deepgozero_prediction(input_pkl, ontology, output_dir):
     prediction_script = os.path.join(DEEPGOZERO_PATH, "deepgozero_predict.py")
     ontology_data_path = os.path.join(DEEPGOZERO_DATA_ROOT, ontology)
     model_file = os.path.join(ontology_data_path, "deepgozero_zero_10.th")
-    terms_file = os.path.join(ontology_data_path, "terms_zero_10.pkl")
+    terms__file = os.path.join(ontology_data_path, "terms_zero_10.pkl")
     cmd = ["python", prediction_script, "--test-data-file", input_pkl, "--model-file", model_file, "--terms-file", terms_file, "--device", "cuda:0"]
     
     try:
@@ -210,7 +196,6 @@ def save_benchmark_output(predictions, ontology, output_dir):
 def main(force_rerun):
     """Main function to orchestrate the entire pipeline for all ontologies."""
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    # Clear status file at the beginning of a run
     if os.path.exists(STATUS_FILE):
         os.remove(STATUS_FILE)
     update_status("Pipeline starting...")
@@ -219,16 +204,17 @@ def main(force_rerun):
     
     interpro_output_tsv = os.path.join(OUTPUT_DIR, "interproscan_results.tsv")
     prediction_input_pkl = os.path.join(OUTPUT_DIR, "prediction_input.pkl")
-    
-    total_proteins = count_fasta_proteins(filtered_fasta_file)
-    if total_proteins == 0:
-        update_status(f"ERROR: No proteins left after filtering. Check sequence lengths in: {FASTA_FILE}")
-        return
-    
+
     if force_rerun or not os.path.exists(interpro_output_tsv):
-        run_interproscan(filtered_fasta_file, interpro_output_tsv, total_proteins)
+        chunk_dir = split_fasta(filtered_fasta_file, OUTPUT_DIR)
+        chunk_files = sorted(glob.glob(os.path.join(chunk_dir, "*.fasta")))
+        
+        for i, chunk_file in enumerate(chunk_files):
+            run_interproscan_chunk(chunk_file, chunk_dir, i + 1)
+        
+        merge_tsv_results(chunk_dir, interpro_output_tsv)
     else:
-        update_status("STEP 1: SKIPPED - Found existing InterProScan results.")
+        update_status("STEP 1: SKIPPED - Found existing merged InterProScan results.")
     
     if force_rerun or not os.path.exists(prediction_input_pkl):
         df_created = create_prediction_dataframe(filtered_fasta_file, interpro_output_tsv, prediction_input_pkl)
