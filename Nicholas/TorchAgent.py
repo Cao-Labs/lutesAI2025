@@ -50,6 +50,7 @@ def train(env, policy, optimizer, episodes=500, eval_log ='eval_log.csv', traini
         with open(training_log, mode='w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(['episode', 'reward', 'time'])
+
     for episode in range(episodes):
         obs = env.reset()
         sequence = torch.tensor(obs["sequence"], dtype=torch.long).unsqueeze(0)
@@ -73,7 +74,7 @@ def train(env, policy, optimizer, episodes=500, eval_log ='eval_log.csv', traini
 
         with open(training_log, mode='a', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow([episode, reward, time.time()])
+            writer.writerow([episode, reward, time.time()-startTime])
 
         if episode % 100 == 0:
             print(f"\n🎯 Episode {episode}: Reward = {reward:.2f}, Baseline = {baseline:.2f}")
@@ -85,7 +86,7 @@ def train(env, policy, optimizer, episodes=500, eval_log ='eval_log.csv', traini
             # Append to CSV log
             with open(eval_log, mode='a', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow([episode, avg_reward,time.time()])
+                writer.writerow([episode, avg_reward,time.time()-startTime])
 
 def evaluate(policy, env, episodes=20, episode_idx=0, best_avg_reward=None):
     total_reward = 0
