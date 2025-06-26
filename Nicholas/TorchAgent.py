@@ -19,12 +19,14 @@ class PolicyNetwork(nn.Module):
             nn.Linear(hidden_size, output_size),
             nn.Sigmoid()  # Since output is a binary vector
         )
+        baseline = 0.0
 
     def forward(self, x):
         return self.model(x)
 
 # --------- 2. Train with REINFORCE ---------
 def train(env, policy, optimizer, episodes=500):
+    baseline = 0.0
     for episode in range(episodes):
         obs = env.reset()
         sequence = torch.tensor(obs["sequence"], dtype=torch.long).unsqueeze(0)  # Shape (1, 512)
@@ -40,13 +42,32 @@ def train(env, policy, optimizer, episodes=500):
         _, reward, _, _ = env.step(action_np)
 
         # REINFORCE loss: maximize reward-weighted log prob
-        loss = -log_probs.sum() * reward
+        baseline = 0.9 * baseline + 0.1 * reward
+        advantage = reward - baseline
+        loss = -advantage * log_probs.sum()
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
         if episode % 100 == 0:
             print(f"Episode {episode}: Reward = {reward}")
+            evaluate(env, policy, episode)
+def evaluate(policy, env, episodes=20):
+    total_reward = 0
+
+    for _ in range(episodes):
+        obs = env.reset()
+        sequence = torch.tensor(obs["sequence"], dtype=torch.long).unsqueeze(0)
+        probs = policy(sequence).squeeze(0)
+
+        # Select GO terms with probability > 0.5
+        action = (probs > 0.5).int().numpy().astype(np.int8)
+
+        _, reward, _, _ = env.step(action)
+        total_reward += reward
+
+    avg_reward = total_reward / episodes
+    print(f"Avg Reward over {episodes} episodes: {avg_reward:.2f}")
 
 # --------- 3. Run Everything ---------
 if __name__ == "__main__":

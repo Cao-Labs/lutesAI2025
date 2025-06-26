@@ -137,8 +137,8 @@ env = GOEnv(protein_data=protein_data_for_env, go_terms=all_go_terms)
 
 # Now you can use env.reset(), env.step() in your RL loop
 obs = env.reset()
-print("Sequence shape:", obs["sequence"].shape)
-print("GO candidates:", obs["go_candidates"][:10])  # first 10 GO terms
+#print("Sequence shape:", obs["sequence"].shape)
+#print("GO candidates:", obs["go_candidates"][:10])  # first 10 GO terms
 
 action = np.zeros(env.max_choices, dtype=np.int8)
 action[:5] = 1  # pretend agent selects first 5 GO terms
