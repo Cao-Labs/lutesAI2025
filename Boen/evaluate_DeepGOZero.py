@@ -92,7 +92,10 @@ def batch_iterator(iterator, batch_size):
             yield batch
 
 def run_interproscan_chunk(chunk_path, output_dir, chunk_num):
-    """Executes InterProScan on a single FASTA chunk."""
+    """
+    Executes InterProScan on a single FASTA chunk.
+    If it fails, it logs the protein IDs in the failed chunk and continues.
+    """
     chunk_name = os.path.basename(chunk_path)
     total_proteins = sum(1 for _ in SeqIO.parse(chunk_path, "fasta"))
     output_tsv = os.path.join(output_dir, f"{os.path.splitext(chunk_name)[0]}.tsv")
@@ -108,15 +111,26 @@ def run_interproscan_chunk(chunk_path, output_dir, chunk_num):
         process = subprocess.run(cmd, check=True, capture_output=True, text=True)
         update_status(f"STEP 1.{chunk_num}: InterProScan completed for {chunk_name}.")
     except subprocess.CalledProcessError as e:
-        error_message = f"InterProScan failed on chunk {chunk_num} ({chunk_name}). STDERR: {e.stderr}"
-        update_status(f"ERROR: {error_message}")
-        raise e
+        # --- MODIFIED BEHAVIOR ---
+        # Now identifies and logs the specific proteins in the failed chunk.
+        failed_proteins = [record.id for record in SeqIO.parse(chunk_path, "fasta")]
+        error_message = (
+            f"WARNING: InterProScan failed on chunk {chunk_num} ({chunk_name}) and will be SKIPPED.\n"
+            f"         The {len(failed_proteins)} protein(s) in this chunk are:\n"
+            f"         {', '.join(failed_proteins)}\n"
+            f"         Error: {e.stderr.strip()}"
+        )
+        update_status(error_message)
     return output_tsv
 
 def merge_tsv_results(chunk_dir, final_tsv_path):
-    """Merges all chunked TSV files into one."""
+    """Merges all successfully created chunked TSV files into one."""
     update_status("STEP 1.M: Merging all InterProScan chunk results...")
     tsv_files = glob.glob(os.path.join(chunk_dir, "*.tsv"))
+    if not tsv_files:
+        update_status("WARNING: No successful InterProScan results to merge.")
+        return
+
     with open(final_tsv_path, 'wb') as outfile:
         for tsv_file in sorted(tsv_files):
             with open(tsv_file, 'rb') as infile:
@@ -137,7 +151,7 @@ def create_prediction_dataframe(fasta_file, interpro_tsv, output_pkl):
                 if len(parts) > 11 and parts[11].startswith("IPR"):
                     interpro_map[protein_id].add(parts[11])
     except FileNotFoundError:
-        update_status(f"WARNING: InterProScan output file not found at {interpro_tsv}. Cannot create DataFrame.")
+        update_status(f"ERROR: Merged InterProScan output file not found at {interpro_tsv}. Cannot create DataFrame.")
         return False
 
     protein_ids = [record.id for record in SeqIO.parse(fasta_file, "fasta")]
@@ -216,6 +230,10 @@ def main(force_rerun):
     else:
         update_status("STEP 1: SKIPPED - Found existing merged InterProScan results.")
     
+    if not os.path.exists(interpro_output_tsv):
+        update_status("ERROR: No InterProScan results were generated. Exiting pipeline.")
+        return
+
     if force_rerun or not os.path.exists(prediction_input_pkl):
         df_created = create_prediction_dataframe(filtered_fasta_file, interpro_output_tsv, prediction_input_pkl)
         if not df_created:
