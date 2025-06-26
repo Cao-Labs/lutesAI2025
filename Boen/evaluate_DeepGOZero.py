@@ -61,6 +61,7 @@ def create_prediction_dataframe(fasta_file, interpro_tsv, output_pkl):
     interpro_map = {}
     total_lines = 0
     interpro_hits = 0
+    proteins_in_interpro = set()
     
     update_status("Parsing InterProScan TSV file...")
     with open(interpro_tsv, 'r') as f:
@@ -75,6 +76,7 @@ def create_prediction_dataframe(fasta_file, interpro_tsv, output_pkl):
                 
             total_lines += 1
             protein_id = parts[0]
+            proteins_in_interpro.add(protein_id)
             
             if protein_id not in interpro_map:
                 interpro_map[protein_id] = set()
@@ -85,23 +87,33 @@ def create_prediction_dataframe(fasta_file, interpro_tsv, output_pkl):
                 interpro_hits += 1
     
     update_status(f"Parsed {total_lines} InterProScan lines, found {interpro_hits} InterPro domain hits")
-    update_status(f"InterPro domains found for {len(interpro_map)} proteins")
+    update_status(f"InterPro results found for {len(proteins_in_interpro)} unique proteins")
     
-    # Load protein IDs from original FASTA file to maintain order
+    # Load protein IDs from original FASTA file
     update_status("Loading protein IDs from original FASTA file...")
-    protein_ids = []
+    all_protein_ids = []
     fasta_count = 0
     
     try:
         for record in SeqIO.parse(fasta_file, "fasta"):
-            protein_ids.append(record.id)
+            all_protein_ids.append(record.id)
             fasta_count += 1
     except Exception as e:
         raise ValueError(f"Error reading FASTA file {fasta_file}: {str(e)}")
     
-    update_status(f"Loaded {fasta_count} protein IDs from FASTA file")
+    update_status(f"Loaded {fasta_count} protein IDs from original FASTA file")
     
-    # Create InterPro lists for each protein
+    # Only include proteins that were actually processed by InterProScan
+    # (This handles the case where some proteins were filtered out due to validation issues)
+    protein_ids = [pid for pid in all_protein_ids if pid in proteins_in_interpro]
+    filtered_out_count = len(all_protein_ids) - len(protein_ids)
+    
+    if filtered_out_count > 0:
+        update_status(f"Note: {filtered_out_count} proteins from FASTA were not found in InterProScan results")
+        update_status(f"(These were likely filtered out during InterProScan processing)")
+        update_status(f"Proceeding with {len(protein_ids)} proteins that have InterProScan results")
+    
+    # Create InterPro lists for each protein that was processed
     interpros_list = []
     proteins_with_domains = 0
     proteins_without_domains = 0
@@ -312,4 +324,42 @@ def main(ontology, force_rerun):
     
     # Check if results already exist and we're not forcing rerun
     if not force_rerun and os.path.exists(prediction_output_csv):
-        update_
+        update_status("DeepGOZero predictions already exist. Use --force-rerun to regenerate.")
+        return
+    
+    try:
+        # Step 1: Validate InterProScan results
+        validate_interproscan_results(interpro_output_tsv)
+        
+        # Step 2: Create prediction DataFrame (skip if exists and not forcing rerun)
+        if force_rerun or not os.path.exists(prediction_input_pkl):
+            protein_count = create_prediction_dataframe(FASTA_FILE, interpro_output_tsv, prediction_input_pkl)
+        else:
+            update_status("STEP 2: SKIPPED - Found existing prediction PKL file.")
+            # Load existing pkl to get protein count
+            df = pd.read_pickle(prediction_input_pkl)
+            protein_count = len(df)
+            update_status(f"Loaded existing prediction data with {protein_count} proteins")
+        
+        # Step 3: Run DeepGOZero prediction
+        prediction_count = run_deepgozero_prediction(prediction_input_pkl, ontology, OUTPUT_DIR)
+        
+        # Final summary
+        update_status("=" * 50)
+        update_status("DEEPGOZERO PIPELINE COMPLETED SUCCESSFULLY!")
+        update_status(f"Input proteins: {protein_count}")
+        update_status(f"Total predictions: {prediction_count}")
+        update_status(f"Ontology: {ontology}")
+        update_status(f"Results saved in: {OUTPUT_DIR}")
+        update_status("=" * 50)
+        
+    except FileNotFoundError as e:
+        update_status(f"ERROR: Required file not found - {str(e)}")
+        update_status("Make sure you have run the InterProScan script first!")
+        raise
+    except Exception as e:
+        update_status(f"ERROR: Pipeline failed - {str(e)}")
+        raise
+
+if __name__ == "__main__":
+    main()
