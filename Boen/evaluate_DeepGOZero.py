@@ -85,8 +85,13 @@ def run_interproscan(fasta_file, output_tsv, total_proteins):
     """Executes InterProScan and starts a parallel monitoring process."""
     update_status("STEP 1: Starting InterProScan analysis...")
     
+    # Running the full analysis suite since the manual test succeeded.
     cmd = [
+<<<<<<< Updated upstream
         INTERPROSCAN_PATH, "-i", fasta_file, "-f", "TSV", "-o", output_tsv,
+=======
+        INTERPROSCAN_PATH, "-i", chunk_path, "-f", "TSV", "-o", output_tsv,
+>>>>>>> Stashed changes
         "--goterms", "-cpu", CPU_CORES
     ]
 
@@ -99,11 +104,26 @@ def run_interproscan(fasta_file, output_tsv, total_proteins):
     monitor.start()
 
     try:
+<<<<<<< Updated upstream
         # Using Popen to run InterProScan in a non-blocking way
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         
         # Wait for the process to complete
         stdout, stderr = process.communicate()
+=======
+        process = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        update_status(f"STEP 1.{chunk_num}: InterProScan completed for {chunk_name}.")
+    except subprocess.CalledProcessError as e:
+        failed_proteins = [record.id for record in SeqIO.parse(chunk_path, "fasta")]
+        error_message = (
+            f"WARNING: InterProScan failed on chunk {chunk_num} ({chunk_name}) and will be SKIPPED.\n"
+            f"         The {len(failed_proteins)} protein(s) in this chunk are:\n"
+            f"         {', '.join(failed_proteins)}\n"
+            f"         Error: {e.stderr.strip()}"
+        )
+        update_status(error_message)
+    return output_tsv
+>>>>>>> Stashed changes
 
         if process.returncode != 0:
             # If InterProScan failed, write its error to the status file and raise exception
@@ -113,10 +133,20 @@ def run_interproscan(fasta_file, output_tsv, total_proteins):
         
         update_status(f"STEP 1: InterProScan completed successfully. Processed {total_proteins} proteins.")
 
+<<<<<<< Updated upstream
     finally:
         # --- NEW: Terminate the monitor process ---
         monitor.terminate()
         monitor.join()
+=======
+    with open(final_tsv_path, 'wb') as outfile:
+        for tsv_file in sorted(tsv_files):
+            # Check if the file is not empty before merging
+            if os.path.getsize(tsv_file) > 0:
+                with open(tsv_file, 'rb') as infile:
+                    outfile.write(infile.read())
+    update_status(f"STEP 1.M: Merged {len(tsv_files)} chunk files into {final_tsv_path}.")
+>>>>>>> Stashed changes
 
 def create_prediction_dataframe(fasta_file, interpro_tsv, output_pkl):
     """Parses InterProScan results and creates the required .pkl file."""
