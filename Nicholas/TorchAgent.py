@@ -31,7 +31,6 @@ class PolicyNetwork(nn.Module):
             nn.Linear(hidden_size, output_size),
             nn.Sigmoid()  # Since output is a binary vector
         )
-        baseline = 0.0
 
     def forward(self, x):
         return self.model(x)
@@ -41,7 +40,7 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
     startTime = time.time()
     baseline = 0.0
     best_avg_reward = -float('inf')
-
+    Reset_Interval = 25000
     # Running mean and std for reward normalization
     reward_sum = 0.0
     reward_sq_sum = 0.0
@@ -94,8 +93,12 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
         with open(training_log, mode='a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([episode, reward, time.time() - startTime])
-
-        if episode % 100 == 0:
+        if episode > 0 and episode % Reset_Interval == 0:
+            reward_sum = 0.0
+            reward_sq_sum = 0.0
+            reward_count = 0
+            print(f"🔄 Reset running stats at episode {episode}")
+        if episode % 250 == 0:
             print(
                 f"\n🎯 Episode {episode}: Reward = {reward:.2f}, Normalized Reward = {normalized_reward:.3f}, Baseline = {baseline:.3f}")
             avg_reward, best_avg_reward = evaluate(policy, env, episodes=10, episode_idx=episode,
@@ -140,4 +143,4 @@ if __name__ == "__main__":
     policy = PolicyNetwork(input_size=512, output_size=env.max_choices)
     optimizer = optim.Adam(policy.parameters(), lr=1e-4)
 
-    train(env, policy, optimizer, episodes=201)
+    train(env, policy, optimizer, episodes=100000)
