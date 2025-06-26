@@ -1,6 +1,8 @@
 # torch_rl_go_agent.py
 
 import torch
+import csv
+import os
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
@@ -25,33 +27,50 @@ class PolicyNetwork(nn.Module):
         return self.model(x)
 
 # --------- 2. Train with REINFORCE ---------
-def train(env, policy, optimizer, episodes=500):
+def train(env, policy, optimizer, episodes=500, log_file='reward_log.csv'):
     baseline = 0.0
+    best_avg_reward = -float('inf')
+
+    # Create CSV file and write header (if not already exists)
+    if not os.path.exists(log_file):
+        with open(log_file, mode='w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['episode', 'avg_reward'])  # header
+
     for episode in range(episodes):
         obs = env.reset()
-        sequence = torch.tensor(obs["sequence"], dtype=torch.long).unsqueeze(0)  # Shape (1, 512)
-        go_candidates = obs["go_candidates"]
+        sequence = torch.tensor(obs["sequence"], dtype=torch.long).unsqueeze(0)
+        probs = policy(sequence).squeeze(0)
 
-        probs = policy(sequence).squeeze(0)  # Shape (100,)
         dist = torch.distributions.Bernoulli(probs)
         action = dist.sample()
         log_probs = dist.log_prob(action)
 
-        # Convert action from Tensor to NumPy for env.step
         action_np = action.detach().numpy().astype(np.int8)
         _, reward, _, _ = env.step(action_np)
 
-        # REINFORCE loss: maximize reward-weighted log prob
+        # REINFORCE loss
         baseline = 0.9 * baseline + 0.1 * reward
         advantage = reward - baseline
         loss = -advantage * log_probs.sum()
+
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
         if episode % 50 == 0:
-            print(f"Episode {episode}: Reward = {reward:.2f}, Baseline = {baseline:.2f}")
-            evaluate(policy, env, episodes=10)
+            print(f"\n🎯 Episode {episode}: Reward = {reward:.2f}, Baseline = {baseline:.2f}")
+            avg_reward = evaluate(policy, env, episodes=10, episode_idx=episode, best_avg_reward=best_avg_reward)
+
+            # Update best model if needed
+            if avg_reward > best_avg_reward:
+                best_avg_reward = avg_reward
+
+            # Append to CSV log
+            with open(log_file, mode='a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([episode, avg_reward])
+
 def evaluate(policy, env, episodes=20):
     total_reward = 0
 
@@ -67,6 +86,7 @@ def evaluate(policy, env, episodes=20):
         total_reward += reward
 
     avg_reward = total_reward / episodes
+
     print(f"Avg Reward over {episodes} episodes: {avg_reward:.2f}")
 
 # --------- 3. Run Everything ---------
