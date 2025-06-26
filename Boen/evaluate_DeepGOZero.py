@@ -43,7 +43,7 @@ def update_status(message):
         f.write(f"{now} - {message}\n")
     print(message)
 
-def filter_long_sequences(input_fasta, output_dir, max_length=5000):
+def filter_long_sequences(input_fasta, output_dir, max_length=4000):
     """
     Filters a FASTA file to remove sequences longer than a specified limit.
     This prevents InterProScan from failing on exceptionally long proteins.
@@ -96,7 +96,6 @@ def monitor_interproscan_progress(tsv_file, total_proteins, status_file_path):
                        f"Processed {processed_count}/{total_proteins} proteins ({percentage:.2f}%). "
                        f"Elapsed time: {elapsed_time/60:.1f} minutes.")
             
-            # Overwrite the status file with the latest progress
             now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             with open(status_file_path, "w") as f:
                 f.write(f"{now} - {message}\n")
@@ -104,17 +103,20 @@ def monitor_interproscan_progress(tsv_file, total_proteins, status_file_path):
             continue
 
 def run_interproscan(fasta_file, output_tsv, total_proteins):
-    """Executes InterProScan on the provided FASTA file."""
-    update_status("STEP 1: Starting InterProScan analysis...")
+    """Executes InterProScan with combined fixes for stability."""
+    update_status("STEP 1: Starting InterProScan analysis (robust mode)...")
     
-    # Running the full InterProScan suite since long sequences have been filtered out.
+    # --- COMBINED FIX ---
+    # We are both using the filtered FASTA file AND disabling fragile applications
+    # to give the highest probability of success.
     cmd = [
         INTERPROSCAN_PATH,
         "-i", fasta_file,
         "-f", "TSV",
         "-o", output_tsv,
         "--goterms",
-        "-cpu", CPU_CORES
+        "-cpu", CPU_CORES,
+        "--disable-applications", "Coils,Phobius,SignalP"
     ]
 
     monitor = multiprocessing.Process(target=monitor_interproscan_progress, args=(output_tsv, total_proteins, STATUS_FILE))
@@ -137,20 +139,27 @@ def create_prediction_dataframe(fasta_file, interpro_tsv, output_pkl):
     """Parses InterProScan results and creates the required .pkl file."""
     update_status("STEP 2: Creating Prediction-Ready DataFrame...")
     interpro_map = {}
-    with open(interpro_tsv, 'r') as f:
-        for line in f:
-            parts = line.strip().split('\t')
-            protein_id = parts[0]
-            if protein_id not in interpro_map:
-                interpro_map[protein_id] = set()
-            if len(parts) > 11 and parts[11].startswith("IPR"):
-                interpro_map[protein_id].add(parts[11])
+    # Use a try-except block in case the TSV file is empty after a failed run
+    try:
+        with open(interpro_tsv, 'r') as f:
+            for line in f:
+                parts = line.strip().split('\t')
+                protein_id = parts[0]
+                if protein_id not in interpro_map:
+                    interpro_map[protein_id] = set()
+                if len(parts) > 11 and parts[11].startswith("IPR"):
+                    interpro_map[protein_id].add(parts[11])
+    except FileNotFoundError:
+        update_status(f"WARNING: InterProScan output file not found at {interpro_tsv}. Cannot create DataFrame.")
+        return False
+
 
     protein_ids = [record.id for record in SeqIO.parse(fasta_file, "fasta")]
     interpros_list = [list(interpro_map.get(pid, set())) for pid in protein_ids]
     df = pd.DataFrame({'proteins': protein_ids, 'interpros': interpros_list})
     df.to_pickle(output_pkl)
     update_status("STEP 2: DataFrame created successfully.")
+    return True
 
 def parse_deepgozero_output(stdout):
     """Parses the raw stdout from DeepGOZero prediction."""
@@ -206,7 +215,6 @@ def main(force_rerun):
         os.remove(STATUS_FILE)
     update_status("Pipeline starting...")
     
-    # --- NEW: Filter long sequences before starting the main pipeline ---
     filtered_fasta_file = filter_long_sequences(FASTA_FILE, OUTPUT_DIR)
     
     interpro_output_tsv = os.path.join(OUTPUT_DIR, "interproscan_results.tsv")
@@ -217,18 +225,19 @@ def main(force_rerun):
         update_status(f"ERROR: No proteins left after filtering. Check sequence lengths in: {FASTA_FILE}")
         return
     
-    # These steps are ontology-agnostic and only need to be run once.
     if force_rerun or not os.path.exists(interpro_output_tsv):
         run_interproscan(filtered_fasta_file, interpro_output_tsv, total_proteins)
     else:
         update_status("STEP 1: SKIPPED - Found existing InterProScan results.")
     
     if force_rerun or not os.path.exists(prediction_input_pkl):
-        create_prediction_dataframe(filtered_fasta_file, interpro_output_tsv, prediction_input_pkl)
+        df_created = create_prediction_dataframe(filtered_fasta_file, interpro_output_tsv, prediction_input_pkl)
+        if not df_created:
+            update_status("Exiting pipeline due to missing InterProScan data.")
+            return
     else:
         update_status("STEP 2: SKIPPED - Found existing prediction PKL.")
 
-    # Loop through each ontology to run predictions
     ontologies_to_predict = ['mf', 'bp', 'cc']
     for ontology in ontologies_to_predict:
         deepgo_preds = run_deepgozero_prediction(prediction_input_pkl, ontology, OUTPUT_DIR)
