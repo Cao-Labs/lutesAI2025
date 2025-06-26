@@ -87,7 +87,7 @@ def train():
     device = torch.device("cuda:1" if torch.cuda.device_count() > 1 else "cuda:0")
 
     # === Training Settings ===
-    batch_size = 128
+    batch_size = 32
     epochs = 5
     learning_rate = 1e-5
     patience = 2
