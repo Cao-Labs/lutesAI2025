@@ -40,9 +40,9 @@ class ProteinFunctionDataset(Dataset):
 
     def __getitem__(self, idx):
         pid = self.ids[idx]
-        embedding = torch.load(os.path.join(self.embedding_dir, f"{pid}.pt"))  # [L, 1541]
+        embedding = torch.load(os.path.join(self.embedding_dir, f"{pid}.pt"))  # [512, 512] PCA-reduced
 
-        attention_mask = (embedding.sum(dim=1) != 0).long()  # [L]
+        attention_mask = (embedding.sum(dim=1) != 0).long()  # [512]
         target = torch.zeros(self.num_labels)
         for term in self.go_labels.get(pid, []):
             if term in self.go_vocab:
@@ -54,7 +54,7 @@ class ProteinFunctionDataset(Dataset):
 class BigBirdProteinModel(nn.Module):
     def __init__(self, input_dim, target_dim, max_len):
         super().__init__()
-        self.project = nn.Linear(input_dim, 1536)  # make divisible by num_heads (8)
+        self.project = nn.Linear(input_dim, 1536)  # Project 512 -> 1536
         config = BigBirdConfig(
             vocab_size=50265,  # dummy
             hidden_size=1536,
@@ -76,27 +76,26 @@ class BigBirdProteinModel(nn.Module):
         )
 
     def forward(self, x, attention_mask):
-        x = self.project(x)  # [B, L, 1536]
+        x = self.project(x)  # [B, 512, 1536]
         outputs = self.bigbird(inputs_embeds=x, attention_mask=attention_mask)
         return outputs.logits  # [B, num_labels]
 
 # === Training Function ===
 def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    batch_size = 128
+    batch_size = 32
     epochs = 5
     learning_rate = 1e-5
-    patience = 2
     min_lr = 1e-7
 
     dataset = ProteinFunctionDataset(
-        "/data/archives/naufal/final_embeddings",
+        "/data/summer2020/naufal/final_embeddings_pca",
         "/data/summer2020/naufal/matched_ids_with_go.txt"
     )
 
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
 
-    model = BigBirdProteinModel(input_dim=1541, target_dim=dataset.num_labels, max_len=1913).to(device)
+    model = BigBirdProteinModel(input_dim=512, target_dim=dataset.num_labels, max_len=512).to(device)
 
     optimizer = AdamW(model.parameters(), lr=learning_rate)
     lr_scheduler = get_scheduler(
@@ -131,8 +130,8 @@ def train():
         print(f"[INFO] Avg Loss: {avg_loss:.4f}")
         lr_scheduler.step(avg_loss)
 
-    torch.save(model.state_dict(), "bigbird_finetuned.pt")
-    print("[✓] Model saved as bigbird_finetuned.pt")
+    torch.save(model.state_dict(), "bigbird_finetuned_pca.pt")
+    print("[✓] Model saved as bigbird_finetuned_pca.pt")
 
 if __name__ == "__main__":
     train()
