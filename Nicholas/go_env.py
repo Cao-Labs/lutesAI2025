@@ -4,7 +4,7 @@ import gym
 import numpy as np
 import random
 from gym import spaces
-file_path = "../../../../databases/UniProt2025/training_data_processedUniprot_DB.txt"  # Change if needed
+file_path = "../../../databases/UniProt2025/training_data_processedUniprot_DB.txt"  # Change if needed
 proteins = {}
 
 current_id = None
