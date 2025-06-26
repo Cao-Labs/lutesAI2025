@@ -71,7 +71,7 @@ def train(env, policy, optimizer, episodes=500, log_file='reward_log.csv'):
                 writer = csv.writer(f)
                 writer.writerow([episode, avg_reward])
 
-def evaluate(policy, env, episodes=20):
+def evaluate(policy, env, episodes=20, episode_idx=0, best_avg_reward=None):
     total_reward = 0
 
     for _ in range(episodes):
@@ -79,15 +79,20 @@ def evaluate(policy, env, episodes=20):
         sequence = torch.tensor(obs["sequence"], dtype=torch.long).unsqueeze(0)
         probs = policy(sequence).squeeze(0)
 
-        # Select GO terms with probability > 0.5
         action = (probs > 0.5).int().numpy().astype(np.int8)
-
         _, reward, _, _ = env.step(action)
         total_reward += reward
 
     avg_reward = total_reward / episodes
+    print(f"✅ Evaluation at Episode {episode_idx}: Avg Reward = {avg_reward:.2f}")
 
-    print(f"Avg Reward over {episodes} episodes: {avg_reward:.2f}")
+    # Save model if best
+    if best_avg_reward is None or avg_reward > best_avg_reward:
+        torch.save(policy.state_dict(), f'best_model_episode_{episode_idx}.pt')
+        print(f"💾 Model saved at episode {episode_idx} with avg reward {avg_reward:.2f}")
+        return avg_reward
+
+    return best_avg_reward
 
 # --------- 3. Run Everything ---------
 if __name__ == "__main__":
