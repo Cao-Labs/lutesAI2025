@@ -143,4 +143,4 @@ if __name__ == "__main__":
     policy = PolicyNetwork(input_size=512, output_size=env.max_choices)
     optimizer = optim.Adam(policy.parameters(), lr=1e-4)
 
-    train(env, policy, optimizer, episodes=100000)
+    train(env, policy, optimizer, episodes=1000)
