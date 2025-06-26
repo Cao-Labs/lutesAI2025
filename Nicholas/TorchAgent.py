@@ -18,6 +18,7 @@ CHECKPOINT_DIR = os.path.join(SAVE_DIR, "checkpoints")
 # Create folders if they don't exist
 os.makedirs(BEST_MODEL_DIR, exist_ok=True)
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # --------- 1. Define the PyTorch Policy Network ---------
 class PolicyNetwork(nn.Module):
@@ -34,6 +35,8 @@ class PolicyNetwork(nn.Module):
 
     def forward(self, x):
         return self.model(x)
+    def to_device(tensor, device):
+        return tensor.to(device) if isinstance(tensor, torch.Tensor) else tensor
 
 # --------- 2. Train with REINFORCE ---------
 def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', training_log='training_log.csv'):
@@ -59,14 +62,16 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
 
     for episode in range(episodes):
         obs = env.reset()
-        sequence = torch.tensor(obs["sequence"], dtype=torch.long).unsqueeze(0)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        policy.to(device)
+        sequence = torch.tensor(obs["sequence"], dtype=torch.long).unsqueeze(0).to(device)
         probs = policy(sequence).squeeze(0)
 
         dist = torch.distributions.Bernoulli(probs)
         action = dist.sample()
         log_probs = dist.log_prob(action)
 
-        action_np = action.detach().numpy().astype(np.int8)
+        action_np = action.detach().cpu().numpy().astype(np.int8)  # send back to CPU for env
         _, reward, _, _ = env.step(action_np)
 
         # Update running stats
@@ -120,7 +125,7 @@ def evaluate(policy, env, episodes=20, episode_idx=0, best_avg_reward=None):
         sequence = torch.tensor(obs["sequence"], dtype=torch.long).unsqueeze(0)
         probs = policy(sequence).squeeze(0)
 
-        action = (probs > 0.5).int().numpy().astype(np.int8)
+        action = (probs > 0.5).int().cpu().numpy().astype(np.int8)
         _, reward, _, _ = env.step(action)
         total_reward += reward
 
@@ -140,7 +145,7 @@ def evaluate(policy, env, episodes=20, episode_idx=0, best_avg_reward=None):
 if __name__ == "__main__":
     env = GOEnv(protein_data=protein_data_for_env, go_terms=all_go_terms)
 
-    policy = PolicyNetwork(input_size=512, output_size=env.max_choices)
+    policy = PolicyNetwork(input_size=512, output_size=env.max_choices).to(device)
     optimizer = optim.Adam(policy.parameters(), lr=1e-4)
 
-    train(env, policy, optimizer, episodes=100000)
+    train(env, policy, optimizer, episodes=1000)
