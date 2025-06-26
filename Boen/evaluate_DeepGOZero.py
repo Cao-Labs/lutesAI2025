@@ -61,7 +61,7 @@ def filter_long_sequences(input_fasta, output_dir, max_length=3000):
     
     return filtered_fasta_path
 
-def split_fasta(input_fasta, output_dir, chunk_size=500):
+def split_fasta(input_fasta, output_dir, chunk_size=50):
     """Splits a fasta file into smaller chunks."""
     update_status(f"STEP 0.5: Splitting FASTA into chunks of {chunk_size}...")
     chunk_dir = os.path.join(output_dir, "fasta_chunks")
@@ -165,7 +165,7 @@ def run_deepgozero_prediction(input_pkl, ontology, output_dir):
     prediction_script = os.path.join(DEEPGOZERO_PATH, "deepgozero_predict.py")
     ontology_data_path = os.path.join(DEEPGOZERO_DATA_ROOT, ontology)
     model_file = os.path.join(ontology_data_path, "deepgozero_zero_10.th")
-    terms__file = os.path.join(ontology_data_path, "terms_zero_10.pkl")
+    terms_file = os.path.join(ontology_data_path, "terms_zero_10.pkl")
     cmd = ["python", prediction_script, "--test-data-file", input_pkl, "--model-file", model_file, "--terms-file", terms_file, "--device", "cuda:0"]
     
     try:
