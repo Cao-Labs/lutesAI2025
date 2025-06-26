@@ -113,8 +113,8 @@ class GOEnv(gym.Env):
         percent_correct = (len(correct) / total_true) * 100 if total_true > 0 else 0.0
 
         # Optional: log info
-        print(f"Reward: {reward} / {total_true} true GO terms")
-        print(f"Percent correct: {percent_correct:.2f}%")
+        # print(f"Reward: {reward} / {total_true} true GO terms")
+        # print(f"Percent correct: {percent_correct:.2f}%")
         # print(f"Selected terms: {selected_terms}")
         # print(f"Correct terms: {correct}")
 
@@ -144,7 +144,7 @@ action = np.zeros(env.max_choices, dtype=np.int8)
 action[:5] = 1  # pretend agent selects first 5 GO terms
 
 next_obs, reward, done, _ = env.step(action)
-print("Reward:", reward)# for prot_id, info in proteins.items():
+# print("Reward:", reward)# for prot_id, info in proteins.items():
 #     print(f"Name: {prot_id}")
 #     print(f"GO terms: {info['go_terms']}")
 #     print(f"Sequence: {info['sequence'][:60]}...")  # Truncated for readability
