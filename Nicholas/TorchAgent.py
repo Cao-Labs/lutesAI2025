@@ -68,7 +68,7 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
         action = dist.sample()
         log_probs = dist.log_prob(action)
 
-        action_np = action.detach().numpy().astype(np.int8)
+        action_np = action.detach().cpu().numpy().astype(np.int8)
         _, reward, _, _ = env.step(action_np)
 
         # Update running stats
