@@ -15,7 +15,7 @@ import shutil
 # ==============================================================================
 
 # 1. Path to your input protein sequences
-FASTA_FILE = "/data/summer2020/naufal/testing_sequences.fasta"
+FASTA_FILE = "/data/summer2020/Boen/benchmark_testing_sequences.fasta"
 
 # 2. Path to the main InterProScan executable shell script
 INTERPROSCAN_PATH = "/data/shared/tools/interproscan-5.75-106.0/interproscan.sh"
@@ -230,7 +230,8 @@ def analyze_problematic_proteins(failed_proteins_with_reasons, validation_issues
 @ck.command()
 @ck.option('--force-rerun', is_flag=True, help="Force re-running InterProScan even if output files exist.")
 @ck.option('--batch-size', default=BATCH_SIZE, help="Number of sequences to process in each batch.")
-def main(force_rerun, batch_size):
+@ck.option('--ignore-validation-issues', is_flag=True, help="Automatically filter out proteins with validation issues (length, invalid characters, etc.)")
+def main(force_rerun, batch_size, ignore_validation_issues):
     """Main function to run InterProScan with error handling."""
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
@@ -261,16 +262,30 @@ def main(force_rerun, batch_size):
     update_status("Validating protein sequences...")
     validation_issues = {}
     valid_sequences = []
+    filtered_sequences = []
     
     for record in sequences:
         issues = validate_protein_sequence(record)
         if issues:
             validation_issues[record.id] = issues
-            update_status(f"Validation issues for {record.id}: {'; '.join(issues)}")
+            if ignore_validation_issues:
+                filtered_sequences.append(record)
+                if len(filtered_sequences) <= 10:  # Only show first 10 for brevity
+                    update_status(f"FILTERED: {record.id} - {'; '.join(issues)}")
+                elif len(filtered_sequences) == 11:
+                    update_status("... (additional filtered sequences not shown)")
+            else:
+                update_status(f"Validation issues for {record.id}: {'; '.join(issues)}")
         else:
             valid_sequences.append(record)
     
-    update_status(f"Validation complete: {len(valid_sequences)} valid, {len(validation_issues)} with issues")
+    if ignore_validation_issues and filtered_sequences:
+        update_status(f"Filtered out {len(filtered_sequences)} proteins with validation issues")
+        update_status(f"Validation complete: {len(valid_sequences)} valid sequences will be processed")
+        # Only track InterProScan-specific failures when ignoring validation issues
+        validation_issues = {}  # Clear validation issues so they're not reported as problematic
+    else:
+        update_status(f"Validation complete: {len(valid_sequences)} valid, {len(validation_issues)} with issues")
     
     # Process valid sequences in batches
     if valid_sequences:
@@ -309,6 +324,14 @@ def main(force_rerun, batch_size):
             f.write("PROBLEMATIC PROTEINS ANALYSIS\n")
             f.write("=" * 50 + "\n\n")
             
+            if ignore_validation_issues and filtered_sequences:
+                f.write(f"FILTERED OUT (validation issues): {len(filtered_sequences)} proteins\n")
+                f.write("These proteins were automatically excluded due to validation issues:\n")
+                for record in filtered_sequences:
+                    issues = validate_protein_sequence(record)
+                    f.write(f"  {record.id}: {'; '.join(issues)}\n")
+                f.write("\n")
+            
             total_problematic = 0
             for category, proteins in problematic_analysis.items():
                 if proteins:
@@ -322,23 +345,44 @@ def main(force_rerun, batch_size):
                     f.write("\n")
                     total_problematic += len(proteins)
             
-            f.write(f"TOTAL PROBLEMATIC PROTEINS: {total_problematic}\n")
-            f.write(f"TOTAL PROCESSED SUCCESSFULLY: {total_proteins - total_problematic}\n")
+            actual_failures = total_problematic
+            if ignore_validation_issues:
+                f.write(f"TOTAL FILTERED (validation issues): {len(filtered_sequences)}\n")
+                f.write(f"TOTAL FAILED (InterProScan errors): {actual_failures}\n")
+                f.write(f"TOTAL PROCESSED SUCCESSFULLY: {len(valid_sequences) - actual_failures}\n")
+            else:
+                f.write(f"TOTAL PROBLEMATIC PROTEINS: {total_problematic}\n")
+                f.write(f"TOTAL PROCESSED SUCCESSFULLY: {total_proteins - total_problematic}\n")
         
         # Summary
-        successful_count = total_proteins - sum(len(proteins) for proteins in problematic_analysis.values())
-        update_status(f"FINAL SUMMARY:")
-        update_status(f"Total proteins: {total_proteins}")
-        update_status(f"Successfully processed: {successful_count}")
-        update_status(f"Problematic proteins: {total_proteins - successful_count}")
-        update_status(f"Success rate: {(successful_count/total_proteins)*100:.1f}%")
+        if ignore_validation_issues:
+            interpro_failures = sum(len(proteins) for proteins in problematic_analysis.values())
+            successful_count = len(valid_sequences) - interpro_failures
+            update_status(f"FINAL SUMMARY:")
+            update_status(f"Total proteins in input: {total_proteins}")
+            update_status(f"Filtered out (validation issues): {len(filtered_sequences)}")
+            update_status(f"Submitted to InterProScan: {len(valid_sequences)}")
+            update_status(f"Successfully processed by InterProScan: {successful_count}")
+            update_status(f"Failed in InterProScan: {interpro_failures}")
+            update_status(f"Overall success rate: {(successful_count/total_proteins)*100:.1f}%")
+            update_status(f"InterProScan success rate: {(successful_count/len(valid_sequences))*100:.1f}%")
+        else:
+            successful_count = total_proteins - sum(len(proteins) for proteins in problematic_analysis.values())
+            update_status(f"FINAL SUMMARY:")
+            update_status(f"Total proteins: {total_proteins}")
+            update_status(f"Successfully processed: {successful_count}")
+            update_status(f"Problematic proteins: {total_proteins - successful_count}")
+            update_status(f"Success rate: {(successful_count/total_proteins)*100:.1f}%")
         
-        # Print problematic protein categories
+        # Print problematic protein categories (only for actual InterProScan failures)
         for category, proteins in problematic_analysis.items():
-            if proteins:
+            if proteins and category != "sequence_validation_issues":  # Skip validation issues if they're being ignored
                 update_status(f"  - {category.replace('_', ' ').title()}: {len(proteins)}")
         
-        update_status(f"Detailed problematic protein analysis saved to: {PROBLEMATIC_PROTEINS_FILE}")
+        if ignore_validation_issues and filtered_sequences:
+            update_status(f"Note: {len(filtered_sequences)} proteins were automatically filtered out due to validation issues")
+        
+        update_status(f"Detailed analysis saved to: {PROBLEMATIC_PROTEINS_FILE}")
         update_status("InterProScan processing complete!")
 
 if __name__ == "__main__":
