@@ -10,7 +10,7 @@ import gym
 import time
 from go_env import GOEnv, proteins, all_go_terms, protein_data_for_env  # You wrote this already
 
-startTime = time.time()
+
 SAVE_DIR = "saved_models"
 os.makedirs(SAVE_DIR, exist_ok=True)
 BEST_MODEL_DIR = os.path.join(SAVE_DIR, "best")
@@ -37,15 +37,22 @@ class PolicyNetwork(nn.Module):
         return self.model(x)
 
 # --------- 2. Train with REINFORCE ---------
-def train(env, policy, optimizer, episodes=500, eval_log ='eval_log.csv', training_log = 'training_log.csv' ):
+def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', training_log='training_log.csv'):
+    startTime = time.time()
     baseline = 0.0
     best_avg_reward = -float('inf')
 
-    # Create CSV file and write header (if not already exists)
+    # Running mean and std for reward normalization
+    reward_sum = 0.0
+    reward_sq_sum = 0.0
+    reward_count = 0
+    epsilon = 1e-8  # to avoid division by zero
+
+    # Create CSV headers
     if not os.path.exists(eval_log):
         with open(eval_log, mode='w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(['episode', 'avg_reward','time'])  # header
+            writer.writerow(['episode', 'avg_reward', 'time'])
     if not os.path.exists(training_log):
         with open(training_log, mode='w', newline='') as f:
             writer = csv.writer(f)
@@ -63,9 +70,21 @@ def train(env, policy, optimizer, episodes=500, eval_log ='eval_log.csv', traini
         action_np = action.detach().numpy().astype(np.int8)
         _, reward, _, _ = env.step(action_np)
 
-        # REINFORCE loss
-        baseline = 0.9 * baseline + 0.1 * reward
-        advantage = reward - baseline
+        # Update running stats
+        reward_sum += reward
+        reward_sq_sum += reward ** 2
+        reward_count += 1
+
+        running_mean = reward_sum / reward_count
+        running_var = (reward_sq_sum / reward_count) - (running_mean ** 2)
+        running_std = running_var ** 0.5
+
+        # Normalize reward
+        normalized_reward = (reward - running_mean) / (running_std + epsilon)
+
+        # REINFORCE loss using normalized reward advantage
+        baseline = 0.9 * baseline + 0.1 * normalized_reward  # baseline updated with normalized reward
+        advantage = normalized_reward - baseline
         loss = -advantage * log_probs.sum()
 
         optimizer.zero_grad()
@@ -74,19 +93,21 @@ def train(env, policy, optimizer, episodes=500, eval_log ='eval_log.csv', traini
 
         with open(training_log, mode='a', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow([episode, reward, time.time()-startTime])
+            writer.writerow([episode, reward, time.time() - startTime])
 
         if episode % 100 == 0:
-            print(f"\n🎯 Episode {episode}: Reward = {reward:.2f}, Baseline = {baseline:.2f}")
-            avg_reward, best_avg_reward = evaluate(policy, env, episodes=10, episode_idx=episode, best_avg_reward=best_avg_reward)
+            print(
+                f"\n🎯 Episode {episode}: Reward = {reward:.2f}, Normalized Reward = {normalized_reward:.3f}, Baseline = {baseline:.3f}")
+            avg_reward, best_avg_reward = evaluate(policy, env, episodes=10, episode_idx=episode,
+                                                   best_avg_reward=best_avg_reward)
             checkpoint_path = os.path.join(CHECKPOINT_DIR, f"model_episode_{episode}.pt")
             torch.save(policy.state_dict(), checkpoint_path)
             print(f"📝 Checkpoint saved to {checkpoint_path}")
 
-            # Append to CSV log
             with open(eval_log, mode='a', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow([episode, avg_reward,time.time()-startTime])
+                writer.writerow([episode, avg_reward, time.time() - startTime])
+
 
 def evaluate(policy, env, episodes=20, episode_idx=0, best_avg_reward=None):
     total_reward = 0
