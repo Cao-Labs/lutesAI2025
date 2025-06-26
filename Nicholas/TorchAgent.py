@@ -49,9 +49,9 @@ def train(env, policy, optimizer, episodes=500):
         loss.backward()
         optimizer.step()
 
-        if episode % 100 == 0:
-            print(f"Episode {episode}: Reward = {reward}")
-            evaluate(env, policy, episode)
+        if episode % 50 == 0:
+            print(f"Episode {episode}: Reward = {reward:.2f}, Baseline = {baseline:.2f}")
+            evaluate(policy, env, episodes=10)
 def evaluate(policy, env, episodes=20):
     total_reward = 0
 
