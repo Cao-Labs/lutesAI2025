@@ -2,7 +2,7 @@ import os
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
-from transformers import BigBirdForSequenceClassification, BigBirdConfig, AdamW, get_scheduler
+from transformers import BigBirdForSequenceClassification, BigBirdConfig
 from collections import defaultdict
 from sklearn.metrics import f1_score
 from tqdm import tqdm
@@ -40,7 +40,7 @@ class ProteinFunctionDataset(Dataset):
 
     def __getitem__(self, idx):
         pid = self.ids[idx]
-        embedding = torch.load(os.path.join(self.embedding_dir, f"{pid}.pt"))  # [512, 512] PCA-reduced
+        embedding = torch.load(os.path.join(self.embedding_dir, f"{pid}.pt"))  # [512, 512]
 
         attention_mask = (embedding.sum(dim=1) != 0).long()  # [512]
         target = torch.zeros(self.num_labels)
@@ -54,9 +54,9 @@ class ProteinFunctionDataset(Dataset):
 class BigBirdProteinModel(nn.Module):
     def __init__(self, input_dim, target_dim, max_len):
         super().__init__()
-        self.project = nn.Linear(input_dim, 1536)  # Project 512 -> 1536
+        self.project = nn.Linear(input_dim, 1536)  # input_dim=512 → project to 1536
         config = BigBirdConfig(
-            vocab_size=50265,  # dummy
+            vocab_size=50265,
             hidden_size=1536,
             num_attention_heads=8,
             num_hidden_layers=12,
@@ -76,20 +76,21 @@ class BigBirdProteinModel(nn.Module):
         )
 
     def forward(self, x, attention_mask):
-        x = self.project(x)  # [B, 512, 1536]
+        x = self.project(x)  # [B, L, 1536]
         outputs = self.bigbird(inputs_embeds=x, attention_mask=attention_mask)
         return outputs.logits  # [B, num_labels]
 
 # === Training Function ===
 def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    batch_size = 32
+    batch_size = 128
     epochs = 5
     learning_rate = 1e-5
+    patience = 2
     min_lr = 1e-7
 
     dataset = ProteinFunctionDataset(
-        "/data/summer2020/naufal/final_embeddings_pca",
+        "/data/summer2020/naufal/final_embeddings_pca",  # PCA-reduced embeddings
         "/data/summer2020/naufal/matched_ids_with_go.txt"
     )
 
@@ -97,41 +98,38 @@ def train():
 
     model = BigBirdProteinModel(input_dim=512, target_dim=dataset.num_labels, max_len=512).to(device)
 
-    optimizer = AdamW(model.parameters(), lr=learning_rate)
-    lr_scheduler = get_scheduler(
-        name="reduce_on_plateau",
-        optimizer=optimizer,
-        factor=0.5,
-        patience=1,
-        threshold=0.001,
-        min_lr=min_lr,
+    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="min", factor=0.5, patience=patience, min_lr=min_lr, verbose=True
     )
 
-    bce_loss = nn.BCEWithLogitsLoss()
+    criterion = nn.BCEWithLogitsLoss()
     model.train()
 
     for epoch in range(epochs):
-        print(f"\n[Epoch {epoch+1}/{epochs}]")
+        print(f"\n[Epoch {epoch + 1}/{epochs}]")
         epoch_loss = 0.0
         for i, (x, attn_mask, y) in enumerate(tqdm(dataloader)):
             x, attn_mask, y = x.to(device), attn_mask.to(device), y.to(device)
+
             optimizer.zero_grad()
             preds = model(x, attn_mask)
-            loss = bce_loss(preds, y)
+            loss = criterion(preds, y)
             loss.backward()
             optimizer.step()
 
             epoch_loss += loss.item()
 
-            if i == 0 or (i + 1) % 10000 == 0:
+            if i == 0 or (i + 1) % 10_000 == 0:
                 print(f"[✓] Trained {i + 1:,} proteins")
 
         avg_loss = epoch_loss / len(dataloader)
         print(f"[INFO] Avg Loss: {avg_loss:.4f}")
-        lr_scheduler.step(avg_loss)
 
-    torch.save(model.state_dict(), "bigbird_finetuned_pca.pt")
-    print("[✓] Model saved as bigbird_finetuned_pca.pt")
+        scheduler.step(avg_loss)
+
+    torch.save(model.state_dict(), "bigbird_finetuned.pt")
+    print("[✓] Model saved as bigbird_finetuned.pt")
 
 if __name__ == "__main__":
     train()
