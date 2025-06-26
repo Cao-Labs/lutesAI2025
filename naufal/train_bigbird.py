@@ -6,7 +6,6 @@ from transformers import BigBirdForSequenceClassification, BigBirdConfig
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from collections import defaultdict
-from sklearn.metrics import f1_score
 from tqdm import tqdm
 
 # === Dataset Class ===
@@ -56,7 +55,7 @@ class ProteinFunctionDataset(Dataset):
 class BigBirdProteinModel(nn.Module):
     def __init__(self, input_dim, target_dim, max_len):
         super().__init__()
-        self.project = nn.Linear(input_dim, 1536)  # Make divisible by 8 heads
+        self.project = nn.Linear(input_dim, 1536)
         config = BigBirdConfig(
             vocab_size=50265,
             hidden_size=1536,
@@ -77,16 +76,14 @@ class BigBirdProteinModel(nn.Module):
         )
 
     def forward(self, x, attention_mask):
-        x = self.project(x)  # [B, L, 1536]
+        x = self.project(x)
         outputs = self.bigbird(inputs_embeds=x, attention_mask=attention_mask)
-        return outputs.logits  # [B, num_labels]
+        return outputs.logits
 
 # === Training Function ===
 def train():
-    # === Device Selection ===
     device = torch.device("cuda:1" if torch.cuda.device_count() > 1 else "cuda:0")
 
-    # === Training Settings ===
     batch_size = 16
     epochs = 5
     learning_rate = 1e-5
