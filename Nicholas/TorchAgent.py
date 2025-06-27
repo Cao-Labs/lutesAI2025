@@ -101,6 +101,9 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
             reward_sq_sum = 0.0
             reward_count = 0
             print(f"🔄 Reset running stats at episode {episode}")
+        if episode % 10 == 0:
+            print(episode)
+
         if episode % 250 == 0:
             print(
                 f"\n🎯 Episode {episode}: Reward = {reward:.2f}, Normalized Reward = {normalized_reward:.3f}, Baseline = {baseline:.3f}")
