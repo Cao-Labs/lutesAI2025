@@ -7,7 +7,7 @@ plt.savefig('training_log.png')
 
 ef = pd.read_csv('eval_log.csv')
 
-ef.plot( x = 'episode', y = 'reward')
+ef.plot( x = 'avg_episode', y = 'reward')
 
 plt.savefig('eval_log.png')
 plt.show()
