@@ -186,10 +186,10 @@ def run_deepgozero_prediction(input_pkl, ontology, output_dir):
     
     cmd = [
         "python", prediction_script, 
-        "--test-data-file", input_pkl,
+        "--data-file", input_pkl,
         "--model-file", model_file, 
         "--terms-file", terms_file, 
-        "--device", "cuda:0"
+        "--device", "cpu"
     ]
     
     update_status(f"Running command: {' '.join(cmd)}")
