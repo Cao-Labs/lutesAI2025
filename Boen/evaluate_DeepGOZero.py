@@ -2,7 +2,7 @@
 
 import click as ck
 import numpy as np
-import pandas as pd
+import pandas as pd  # This is already here, good
 import gzip
 import os
 import sys
@@ -50,6 +50,7 @@ ont = 'bp'  # Changed from 'mf' to 'bp'
     '--output-file', '-o', default='/data/summer2020/Boen/deepgozero_pipeline_output/deepgozero_predictions_bp.csv',
     help='Output CSV file for predictions')
 def main(data_root, ont, data_file, device, output_file):
+    import pandas as pd  # Add this import here
     terms_file = f'{data_root}/{ont}/terms.pkl'
     model_file = f'{data_root}/{ont}/deepgozero.th'
     go = Ontology(f'{data_root}/go.obo', with_rels=True)
@@ -153,8 +154,7 @@ def main(data_root, ont, data_file, device, output_file):
     
     # Save predictions to CSV
     if predictions:
-        import pandas as pd
-        pred_df = pd.DataFrame(predictions)
+        pred_df = pd.DataFrame(predictions)  # pd should work now
         pred_df.to_csv(output_file, index=False)
         print(f"Predictions saved to: {output_file}")
         print(f"Summary: {len(pred_df)} predictions for {pred_df['Protein_ID'].nunique()} proteins")
