@@ -51,9 +51,12 @@ logging.basicConfig(level=logging.WARNING)  # Reduced verbosity
     '--threshold', '-t', default=0.0, type=float,
     help='Minimum score threshold for predictions (default: 0.0)')
 @ck.option(
+    '--model-name', '-m', default='deepgozero_zero.th',
+    help='Model file name (try: deepgozero_zero.th, deepgozero_zero_10.th)')
+@ck.option(
     '--verbose', '-v', is_flag=True,
     help='Enable verbose output')
-def main(data_root, ont, data_file, device, output_file, threshold, verbose):
+def main(data_root, ont, data_file, device, output_file, threshold, model_name, verbose):
     print(f"🚀 Starting DeepGOZero prediction for {ont} ontology")
     print(f"📊 Using threshold: {threshold} (0 = all predictions)")
     print(f"💾 Output file: {output_file}")
