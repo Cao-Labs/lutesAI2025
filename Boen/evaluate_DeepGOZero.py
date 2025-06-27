@@ -33,30 +33,18 @@ logging.basicConfig(level=logging.WARNING)  # Reduced verbosity
 
 @ck.command()
 @ck.option(
-    '--data-root', '-dr', default='/data/shared/tools/deepgozero/data/',
-    help='Data root')
-@ck.option(
-    '--ont', '-ont', default='bp',
-    help='Subontology')
-@ck.option(
-    '--data-file', '-df', default='/data/summer2020/Boen/deepgozero_pipeline_output/prediction_input_bp_fixed.pkl',
-    help='Pandas pkl file with proteins and their interpo annotations')
-@ck.option(
-    '--device', '-d', default='cpu',
-    help='Device')
-@ck.option(
-    '--output-file', '-o', default='/data/summer2020/Boen/deepgozero_pipeline_output/deepgozero_predictions_bp.csv',
-    help='Output CSV file for predictions')
-@ck.option(
-    '--threshold', '-t', default=0.0, type=float,
-    help='Minimum score threshold for predictions (default: 0.0)')
-@ck.option(
-    '--model-name', '-m', default='deepgozero_zero.th',
-    help='Model file name (try: deepgozero_zero.th, deepgozero_zero_10.th)')
-@ck.option(
     '--verbose', '-v', is_flag=True,
     help='Enable verbose output')
-def main(data_root, ont, data_file, device, output_file, threshold, model_name, verbose):
+def main(verbose):
+    # HARDCODED PATHS - NO MORE COMMAND LINE BULLSHIT
+    data_root = '/data/shared/tools/deepgozero/data/'
+    ont = 'bp'
+    data_file = '/data/summer2020/Boen/deepgozero_pipeline_output/prediction_input_bp_fixed.pkl'
+    device = 'cpu'
+    output_file = '/data/summer2020/Boen/deepgozero_pipeline_output/deepgozero_predictions_bp.csv'
+    threshold = 0.0
+    model_name = 'deepgozero_zero.th'
+    
     print(f"🚀 Starting DeepGOZero prediction for {ont} ontology")
     print(f"📊 Using threshold: {threshold} (0 = all predictions)")
     print(f"💾 Output file: {output_file}")
@@ -64,8 +52,24 @@ def main(data_root, ont, data_file, device, output_file, threshold, model_name, 
     
     # Load required files
     terms_file = f'{data_root}/{ont}/terms.pkl'
-    model_file = f'{data_root}/{ont}/deepgozero.th'
+    model_file = f'{data_root}/{ont}/{model_name}'
     go = Ontology(f'{data_root}/go.obo', with_rels=True)
+
+    print(f"🎯 Using model: {model_name}")
+    
+    # Check if model file exists and show size
+    if os.path.exists(model_file):
+        size_mb = os.path.getsize(model_file) / (1024*1024)
+        print(f"📁 Model size: {size_mb:.1f}MB")
+    else:
+        print(f"❌ Model file not found: {model_file}")
+        print("Available models:")
+        model_dir = f'{data_root}/{ont}/'
+        for f in os.listdir(model_dir):
+            if f.endswith('.th'):
+                size_mb = os.path.getsize(os.path.join(model_dir, f)) / (1024*1024)
+                print(f"   {f} ({size_mb:.1f}MB)")
+        return
 
     print("📁 Loading data files...")
     df = pd.read_pickle(data_file)
