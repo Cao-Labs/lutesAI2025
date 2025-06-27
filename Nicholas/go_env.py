@@ -9,7 +9,7 @@ proteins = {}
 current_id = None
 current_go = None
 sequence_lines = []
-
+hundred_over = 0
 with open(file_path, 'r') as f:
     for line in f:
         line = line.strip()
@@ -38,7 +38,15 @@ with open(file_path, 'r') as f:
             "go_terms": current_go.split(';'),
             "sequence": ''.join(sequence_lines)
         }
-
+    # ✅ Filter out proteins with more than 100 GO terms
+    original_count = len(proteins)
+    proteins = {
+        pid: info for pid, info in proteins.items()
+        if len(info["go_terms"]) <= 100
+    }
+    filtered_count = len(proteins)
+    print(
+        f"[INFO] Filtered proteins: kept {filtered_count} of {original_count} (removed {original_count - filtered_count}) entries with ≤ 100 GO terms")
 # ✅ Print example
 proteinSpecific = random.choice(list(proteins.items()))
 protein_id, info = proteinSpecific
