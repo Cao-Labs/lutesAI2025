@@ -81,7 +81,7 @@ def find_mappings_efficiently(target_uniprot_ids):
 def rename_pdb_files_with_mappings(uniprot_mappings, filename_to_uniprot):
     """Rename PDB files using the found mappings"""
     input_pdb_dir = "/data/summer2020/Boen/benchmark_testing_pdbs"
-    output_pdb_dir = "/data/summer2020/Boen/benchmark_testing_pdbs_renamed"
+    output_pdb_dir = "/data/summer2020/Boen/TransFun/data/benchmark_testing_pdbs_renamed"
     
     # Create output directory
     os.makedirs(output_pdb_dir, exist_ok=True)
