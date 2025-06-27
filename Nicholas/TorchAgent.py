@@ -39,7 +39,7 @@ class PolicyNetwork(nn.Module):
     #     return tensor.to(device) if isinstance(tensor, torch.Tensor) else tensor
 
 # --------- 2. Train with REINFORCE ---------
-def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', training_log='training_log.csv'):
+def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', training_log='training_log_test.csv'):
     startTime = time.time()
     baseline = 0.0
     best_avg_reward = -float('inf')
@@ -58,7 +58,7 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
     if not os.path.exists(training_log):
         with open(training_log, mode='w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(['episode', 'reward', 'baseline','advantage','loss','time'])
+            writer.writerow(['episode', 'reward','selected_amount','time'])
 
     for episode in range(episodes):
         obs = env.reset()
@@ -70,6 +70,7 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
         log_probs = dist.log_prob(action)
 
         action_np = action.detach().cpu().numpy().astype(np.int8)  # send back to CPU for env
+        num_selected_terms = int(np.sum(action_np))  # Total GO terms selected
         _, reward, _, _ = env.step(action_np)
 
         # Update running stats
@@ -95,7 +96,7 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
 
         with open(training_log, mode='a', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow([episode, reward,baseline,advantage,loss, time.time() - startTime])
+            writer.writerow([episode, reward, num_selected_terms,time.time() - startTime])
         if episode > 0 and episode % Reset_Interval == 0:
             reward_sum = 0.0
             reward_sq_sum = 0.0
@@ -113,7 +114,7 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
 
             with open(eval_log, mode='a', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow([episode, avg_reward, time.time() - startTime])
+                writer.writerow([episode, avg_reward,time.time() - startTime])
 
 
 def evaluate(policy, env, episodes=20, episode_idx=0, best_avg_reward=None):
