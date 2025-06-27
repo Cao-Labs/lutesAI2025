@@ -2,7 +2,7 @@
 
 import click as ck
 import numpy as np
-import pandas as pd  # This is already here, good
+import pandas as pd
 import gzip
 import os
 import sys
@@ -29,33 +29,42 @@ except ImportError as e:
     print("Make sure DeepGOZero is installed at /data/shared/tools/deepgozero")
     sys.exit(1)
 
-logging.basicConfig(level=logging.INFO)
-
-ont = 'bp'  # Changed from 'mf' to 'bp'
+logging.basicConfig(level=logging.WARNING)  # Reduced verbosity
 
 @ck.command()
 @ck.option(
-    '--data-root', '-dr', default='/data/shared/tools/deepgozero/data/',  # FULL PATH
+    '--data-root', '-dr', default='/data/shared/tools/deepgozero/data/',
     help='Data root')
 @ck.option(
-    '--ont', '-ont', default='bp',  # Changed from 'mf' to 'bp'
+    '--ont', '-ont', default='bp',
     help='Subontology')
 @ck.option(
-    '--data-file', '-df', default='/data/summer2020/Boen/deepgozero_pipeline_output/prediction_input_bp_fixed.pkl',  # FULL PATH
+    '--data-file', '-df', default='/data/summer2020/Boen/deepgozero_pipeline_output/prediction_input_bp_fixed.pkl',
     help='Pandas pkl file with proteins and their interpo annotations')
 @ck.option(
-    '--device', '-d', default='cpu',  # Changed from 'cuda:1' to 'cpu'
+    '--device', '-d', default='cpu',
     help='Device')
 @ck.option(
     '--output-file', '-o', default='/data/summer2020/Boen/deepgozero_pipeline_output/deepgozero_predictions_bp.csv',
     help='Output CSV file for predictions')
-def main(data_root, ont, data_file, device, output_file):
-    import pandas as pd  # Add this import here
+@ck.option(
+    '--threshold', '-t', default=0.0, type=float,
+    help='Minimum score threshold for predictions (default: 0.0)')
+@ck.option(
+    '--verbose', '-v', is_flag=True,
+    help='Enable verbose output')
+def main(data_root, ont, data_file, device, output_file, threshold, verbose):
+    print(f"🚀 Starting DeepGOZero prediction for {ont} ontology")
+    print(f"📊 Using threshold: {threshold} (0 = all predictions)")
+    print(f"💾 Output file: {output_file}")
+    print("-" * 60)
+    
+    # Load required files
     terms_file = f'{data_root}/{ont}/terms.pkl'
     model_file = f'{data_root}/{ont}/deepgozero.th'
     go = Ontology(f'{data_root}/go.obo', with_rels=True)
 
-    # Load interpro data
+    print("📁 Loading data files...")
     df = pd.read_pickle(data_file)
     terms_df = pd.read_pickle(terms_file)
     terms = terms_df['gos'].values.flatten()
@@ -70,26 +79,34 @@ def main(data_root, ont, data_file, device, output_file):
 
     defins = get_goplus_defs(f'{data_root}/definitions_go.txt')
     zero_terms = [term for term in zero_classes if term in defins and go.get_namespace(term) == NAMESPACES[ont]]
-    print(f"Zero-shot terms: {len(zero_terms)}")
     
-    # Create model with correct dimensions
+    print(f"📈 Data summary:")
+    print(f"   • Proteins: {len(df)}")
+    print(f"   • InterPro features: {len(iprs_dict)}")
+    print(f"   • Zero-shot GO terms: {len(zero_terms)}")
+    
+    # Create and load model
+    print("🧠 Loading model...")
     net = DGELModel(len(iprs_dict), len(terms), len(zero_classes), len(rels_dict), device).to(device)
     
-    # FIXED MODEL LOADING - Handle missing BatchNorm running statistics
-    print('Loading the model with missing key handling...')
+    # Try strict loading first
     try:
-        # Load the state dict
         state_dict = th.load(model_file, map_location=device)
+        net.load_state_dict(state_dict, strict=True)
+        print("✅ Model loaded successfully (strict mode)")
         
-        # Load with strict=False to allow missing keys
+    except Exception as e:
+        print(f"⚠️  Strict loading failed: {str(e)[:100]}...")
+        print("🔄 Trying flexible loading...")
+        
         missing_keys, unexpected_keys = net.load_state_dict(state_dict, strict=False)
         
         if missing_keys:
-            print(f"Missing keys (will use default values): {missing_keys}")
-        if unexpected_keys:
-            print(f"Unexpected keys (ignored): {unexpected_keys}")
-            
-        # Initialize missing BatchNorm running statistics manually
+            print(f"⚠️  Missing keys: {len(missing_keys)} (may affect performance)")
+            if verbose:
+                print(f"   Missing: {missing_keys}")
+                
+        # Initialize missing BatchNorm statistics
         for name, module in net.named_modules():
             if isinstance(module, th.nn.BatchNorm1d):
                 if not hasattr(module, 'running_mean') or module.running_mean is None:
@@ -97,24 +114,16 @@ def main(data_root, ont, data_file, device, output_file):
                 if not hasattr(module, 'running_var') or module.running_var is None:
                     module.running_var = th.ones(module.num_features)
                     
-        print("Model loaded successfully with missing key handling!")
-        
-    except Exception as e:
-        print(f"Error loading model: {e}")
-        return
+        print("✅ Model loaded with flexible mode")
     
     net.eval()
 
+    # Prepare data
+    print("🔧 Processing input data...")
     zero_terms_dict = {v: k for k, v in enumerate(zero_terms)}
-    data = get_data(df, iprs_dict, zero_terms_dict)
+    data = get_data(df, iprs_dict, zero_terms_dict, verbose)
     
-    print(f"Data tensor shape: {data[0].shape}")
-    print(f"Processing {data[0].shape[0]} proteins...")
-    
-    # Check how many proteins have features
-    proteins_with_features = (data[0].sum(dim=1) > 0).sum().item()
-    print(f"Proteins with InterPro features: {proteins_with_features}/{data[0].shape[0]}")
-    
+    # Setup data loader
     batch_size = 1000
     data_loader = FastTensorDataLoader(*data, batch_size=batch_size, shuffle=False)
 
@@ -124,94 +133,98 @@ def main(data_root, ont, data_file, device, output_file):
         
     scores = np.zeros((data[0].shape[0], len(zero_terms)), dtype=np.float32)
     
-    print("Running predictions...")
+    # Run predictions
+    print("🔮 Running predictions...")
+    total_batches = len(data_loader)
+    
     for i, batch_data in enumerate(data_loader):
         batch_data, _ = batch_data
-        with th.no_grad():  # Add no_grad for efficiency
+        with th.no_grad():
             zero_score = net.predict_zero(
                 batch_data.to(device), go_data).cpu().detach().numpy()
         scores[i * batch_size: (i + 1) * batch_size] = zero_score
         
-        if i % 10 == 0:
-            print(f"Processed batch {i+1}/{len(data_loader)}")
+        # Progress update every 20% or every 50 batches, whichever is less frequent
+        progress_interval = max(1, min(50, total_batches // 5))
+        if (i + 1) % progress_interval == 0 or i == total_batches - 1:
+            progress = (i + 1) / total_batches * 100
+            print(f"   Progress: {progress:.1f}% ({i+1}/{total_batches} batches)")
     
-    print("Generating predictions...")
+    # Generate predictions
+    print("📝 Generating final predictions...")
+    predictions = []
     prediction_count = 0
-    predictions = []  # Store predictions for CSV output
+    proteins_with_predictions = 0
     
     for i, row in enumerate(df.itertuples()):
+        protein_predictions = 0
         for j, go_id in enumerate(zero_terms):
-            if scores[i, j] >= 0.01:  # Threshold for output
-                print(row.proteins, go_id, scores[i, j])
+            if scores[i, j] >= threshold:
                 predictions.append({
                     'Protein_ID': row.proteins,
                     'GO_Term': go_id,
                     'Score': float(scores[i, j])
                 })
                 prediction_count += 1
+                protein_predictions += 1
                 
-    print(f"Total predictions generated: {prediction_count}")
+        if protein_predictions > 0:
+            proteins_with_predictions += 1
+            
+        # Show progress for large datasets
+        if len(df) > 1000 and (i + 1) % (len(df) // 10) == 0:
+            progress = (i + 1) / len(df) * 100
+            print(f"   Processing proteins: {progress:.0f}%")
     
-    # Save predictions to CSV
+    # Save results
+    print("💾 Saving results...")
     if predictions:
-        pred_df = pd.DataFrame(predictions)  # pd should work now
+        pred_df = pd.DataFrame(predictions)
+        pred_df = pred_df.sort_values(['Protein_ID', 'Score'], ascending=[True, False])
         pred_df.to_csv(output_file, index=False)
-        print(f"Predictions saved to: {output_file}")
-        print(f"Summary: {len(pred_df)} predictions for {pred_df['Protein_ID'].nunique()} proteins")
+        
+        print("✅ COMPLETED!")
+        print("-" * 60)
+        print("📊 RESULTS SUMMARY:")
+        print(f"   • Total predictions: {len(pred_df):,}")
+        print(f"   • Proteins with predictions: {proteins_with_predictions:,}/{len(df):,} ({proteins_with_predictions/len(df)*100:.1f}%)")
+        print(f"   • Average predictions per protein: {len(pred_df)/proteins_with_predictions:.1f}")
+        print(f"   • Score range: {pred_df['Score'].min():.3f} - {pred_df['Score'].max():.3f}")
+        print(f"   • Median score: {pred_df['Score'].median():.3f}")
+        print(f"   • Output saved to: {output_file}")
+        
+        # Show top predictions sample
+        if verbose:
+            print("\n🔍 Sample top predictions:")
+            sample = pred_df.head(10)
+            for _, row in sample.iterrows():
+                print(f"   {row['Protein_ID']} -> {row['GO_Term']} (score: {row['Score']:.3f})")
+        
     else:
-        print("WARNING: No predictions generated!")
+        print("⚠️  WARNING: No predictions generated!")
+        print(f"   All scores below threshold {threshold}")
+        print(f"   Try lowering the threshold or check your data")
         
     return prediction_count
                 
-def compute_roc(labels, preds):
-    # Compute ROC curve and ROC area for each class
-    fpr, tpr, _ = roc_curve(labels.flatten(), preds.flatten())
-    roc_auc = auc(fpr, tpr)
-    return roc_auc, fpr, tpr
-
-
-def compute_fmax(labels, preds):
-    fmax = 0.0
-    pmax = 0
-    rmax = 0
-    patience = 0
-    precs = []
-    recs = []
-    for t in range(0, 101):
-        threshold = t / 100.0
-        predictions = (preds >= threshold).astype(np.float32)
-        tp = np.sum(labels * predictions, axis=1)
-        fp = np.sum(predictions, axis=1) - tp
-        fn = np.sum(labels, axis=1) - tp
-        tp_ind = tp > 0
-        tp = tp[tp_ind]
-        fp = fp[tp_ind]
-        fn = fn[tp_ind]
-        if len(tp) == 0:
-            continue
-        p = np.mean(tp / (tp + fp))
-        r = np.sum(tp / (tp + fn)) / len(tp_ind)
-        precs.append(p)
-        recs.append(r)
-        f = 2 * p * r / (p + r)
-        if fmax <= f:
-            fmax = f
-    return fmax, precs, recs
-
-
-def get_data(df, iprs_dict, terms_dict):
+def get_data(df, iprs_dict, terms_dict, verbose=False):
     data = th.zeros((len(df), len(iprs_dict)), dtype=th.float32)
     labels = th.zeros((len(df), len(terms_dict)), dtype=th.float32)
     
-    print(f"Creating data matrix: {len(df)} proteins x {len(iprs_dict)} InterPro features")
+    if verbose:
+        print(f"   Creating data matrix: {len(df)} proteins × {len(iprs_dict)} InterPro features")
     
     proteins_with_interpros = 0
+    total_interpro_matches = 0
+    
     for i, row in enumerate(df.itertuples()):
         has_interpro = False
         for ipr in row.interpros:
             if ipr in iprs_dict:
                 data[i, iprs_dict[ipr]] = 1
                 has_interpro = True
+                total_interpro_matches += 1
+                
         if has_interpro:
             proteins_with_interpros += 1
             
@@ -221,8 +234,16 @@ def get_data(df, iprs_dict, terms_dict):
                 if go_id in terms_dict:
                     g_id = terms_dict[go_id]
                     labels[i, g_id] = 1
-                    
-    print(f"Proteins with matching InterPro domains: {proteins_with_interpros}/{len(df)}")
+    
+    feature_coverage = proteins_with_interpros / len(df) * 100
+    avg_features = total_interpro_matches / len(df)
+    
+    print(f"   • Proteins with InterPro features: {proteins_with_interpros:,}/{len(df):,} ({feature_coverage:.1f}%)")
+    print(f"   • Average InterPro domains per protein: {avg_features:.1f}")
+    
+    if feature_coverage < 50:
+        print("   ⚠️  Low feature coverage - predictions may be limited")
+    
     return data, labels
 
 if __name__ == '__main__':
