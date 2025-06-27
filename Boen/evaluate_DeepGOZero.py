@@ -186,10 +186,10 @@ def run_deepgozero_prediction(input_pkl, ontology, output_dir):
     
     cmd = [
         "python", prediction_script, 
-        "--data-file", input_pkl,
-        "--model-file", model_file, 
-        "--terms-file", terms_file, 
-        "--device", "cpu"
+        "--data-root", DEEPGOZERO_DATA_ROOT,  # Point to your data directory
+        "--ont", ontology,                    # bp, mf, or cc
+        "--data-file", input_pkl,             # Your pickle file
+        "--device", "cpu"                     # Use CPU
     ]
     
     update_status(f"Running command: {' '.join(cmd)}")
