@@ -101,8 +101,6 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
             reward_sq_sum = 0.0
             reward_count = 0
             print(f"🔄 Reset running stats at episode {episode}")
-        if episode % 10 == 0:
-            print(episode)
 
         if episode % 250 == 0:
             print(
@@ -152,4 +150,4 @@ if __name__ == "__main__":
     policy = PolicyNetwork(input_size=512, output_size=env.max_choices).to(device)
     optimizer = optim.Adam(policy.parameters(), lr=1e-4)
 
-    train(env, policy, optimizer, episodes=1000)
+    train(env, policy, optimizer, episodes=50000)
