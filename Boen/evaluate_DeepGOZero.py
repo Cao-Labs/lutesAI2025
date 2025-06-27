@@ -96,32 +96,11 @@ def main(verbose):
     print("🧠 Loading model...")
     net = DGELModel(len(iprs_dict), len(terms), len(zero_classes), len(rels_dict), device).to(device)
     
-    # Try strict loading first
-    try:
-        state_dict = th.load(model_file, map_location=device)
-        net.load_state_dict(state_dict, strict=True)
-        print("✅ Model loaded successfully (strict mode)")
-        
-    except Exception as e:
-        print(f"⚠️  Strict loading failed: {str(e)[:100]}...")
-        print("🔄 Trying flexible loading...")
-        
-        missing_keys, unexpected_keys = net.load_state_dict(state_dict, strict=False)
-        
-        if missing_keys:
-            print(f"⚠️  Missing keys: {len(missing_keys)} (may affect performance)")
-            if verbose:
-                print(f"   Missing: {missing_keys}")
-                
-        # Initialize missing BatchNorm statistics
-        for name, module in net.named_modules():
-            if isinstance(module, th.nn.BatchNorm1d):
-                if not hasattr(module, 'running_mean') or module.running_mean is None:
-                    module.running_mean = th.zeros(module.num_features)
-                if not hasattr(module, 'running_var') or module.running_var is None:
-                    module.running_var = th.ones(module.num_features)
-                    
-        print("✅ Model loaded with flexible mode")
+    # FORCE STRICT LOADING - NO FLEXIBLE BULLSHIT
+    print("⚡ Attempting STRICT model loading...")
+    state_dict = th.load(model_file, map_location=device)
+    net.load_state_dict(state_dict, strict=True)  # CRASH IF ANYTHING IS WRONG
+    print("✅ Model loaded successfully (strict mode)")
     
     net.eval()
 
