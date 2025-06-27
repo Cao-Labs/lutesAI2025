@@ -3,6 +3,6 @@ import matplotlib.pyplot as plt
 
 df = pd.read_csv('training_log.csv')
 
-df.plot()
+df.plot( x = 'episode', y = 'reward')
 
 plt.show()
