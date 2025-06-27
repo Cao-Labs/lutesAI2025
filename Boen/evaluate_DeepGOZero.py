@@ -7,27 +7,13 @@ import click as ck
 
 # ==============================================================================
 # --- CONFIGURATION ---
-# YOU MUST EDIT THESE PATHS TO MATCH YOUR SYSTEM
 # ==============================================================================
 
-# 1. Path to your input protein sequences (same as used for InterProScan)
 FASTA_FILE = "/data/summer2020/Boen/benchmark_testing_sequences.fasta"
-
-# 2. Path to the cloned DeepGOZero repository
 DEEPGOZERO_PATH = "/data/shared/tools/deepgozero"
-
-# 3. Path to the downloaded and extracted data from the DeepGOZero website
 DEEPGOZERO_DATA_ROOT = "/data/shared/tools/deepgozero/data"
-
-# 4. A directory where InterProScan results and other outputs are stored
 OUTPUT_DIR = "/data/summer2020/Boen/deepgozero_pipeline_output"
-
-# 5. Which ontology to predict for: 'mf', 'bp', or 'cc'
 ONTOLOGY = 'bp'
-
-# ==============================================================================
-# --- SCRIPT LOGIC ---
-# ==============================================================================
 
 STATUS_FILE = os.path.join(OUTPUT_DIR, "deepgozero_status.txt")
 
@@ -38,32 +24,14 @@ def update_status(message):
         f.write(f"{now} - {message}\n")
     print(message)
 
-def validate_interproscan_results(interpro_tsv):
-    """Validates that InterProScan results exist and contain data."""
-    if not os.path.exists(interpro_tsv):
-        raise FileNotFoundError(f"InterProScan results file not found: {interpro_tsv}")
+def create_prediction_dataframe_fixed(fasta_file, interpro_tsv, output_pkl):
+    """Creates the DataFrame in the exact format expected by deepgozero_predict.py"""
+    update_status("Creating prediction-ready DataFrame (FIXED FORMAT)...")
     
-    # Count lines in the file
-    with open(interpro_tsv, 'r') as f:
-        line_count = sum(1 for line in f if line.strip())
-    
-    if line_count == 0:
-        raise ValueError(f"InterProScan results file is empty: {interpro_tsv}")
-    
-    update_status(f"InterProScan results validated: {line_count} result lines found")
-    return line_count
-
-def create_prediction_dataframe(fasta_file, interpro_tsv, output_pkl):
-    """Parses InterProScan results and creates the required .pkl file for DeepGOZero."""
-    update_status("Creating prediction-ready DataFrame from InterProScan results...")
-    
-    # Parse InterProScan results to extract InterPro domains
+    # Parse InterProScan results
     interpro_map = {}
-    total_lines = 0
-    interpro_hits = 0
     proteins_in_interpro = set()
     
-    update_status("Parsing InterProScan TSV file...")
     with open(interpro_tsv, 'r') as f:
         for line in f:
             line = line.strip()
@@ -71,89 +39,53 @@ def create_prediction_dataframe(fasta_file, interpro_tsv, output_pkl):
                 continue
                 
             parts = line.split('\t')
-            if len(parts) < 12:  # InterProScan TSV should have at least 12 columns
+            if len(parts) < 12:
                 continue
                 
-            total_lines += 1
             protein_id = parts[0]
             proteins_in_interpro.add(protein_id)
             
             if protein_id not in interpro_map:
                 interpro_map[protein_id] = set()
             
-            # Column 11 (index 11) contains InterPro accession
+            # Column 11 contains InterPro accession
             if len(parts) > 11 and parts[11] and parts[11].startswith("IPR"):
                 interpro_map[protein_id].add(parts[11])
-                interpro_hits += 1
     
-    update_status(f"Parsed {total_lines} InterProScan lines, found {interpro_hits} InterPro domain hits")
-    update_status(f"InterPro results found for {len(proteins_in_interpro)} unique proteins")
-    
-    # Load protein IDs from original FASTA file
-    update_status("Loading protein IDs from original FASTA file...")
+    # Load protein IDs from FASTA
     all_protein_ids = []
-    fasta_count = 0
+    for record in SeqIO.parse(fasta_file, "fasta"):
+        all_protein_ids.append(record.id)
     
-    try:
-        for record in SeqIO.parse(fasta_file, "fasta"):
-            all_protein_ids.append(record.id)
-            fasta_count += 1
-    except Exception as e:
-        raise ValueError(f"Error reading FASTA file {fasta_file}: {str(e)}")
-    
-    update_status(f"Loaded {fasta_count} protein IDs from original FASTA file")
-    
-    # Only include proteins that were actually processed by InterProScan
-    # (This handles the case where some proteins were filtered out due to validation issues)
+    # Filter to proteins that have InterProScan results
     protein_ids = [pid for pid in all_protein_ids if pid in proteins_in_interpro]
-    filtered_out_count = len(all_protein_ids) - len(protein_ids)
     
-    if filtered_out_count > 0:
-        update_status(f"Note: {filtered_out_count} proteins from FASTA were not found in InterProScan results")
-        update_status(f"(These were likely filtered out during InterProScan processing)")
-        update_status(f"Proceeding with {len(protein_ids)} proteins that have InterProScan results")
-    
-    # Create InterPro lists for each protein that was processed
+    # Create the DataFrame in the EXACT format expected by deepgozero_predict.py
+    proteins_list = []
     interpros_list = []
-    proteins_with_domains = 0
-    proteins_without_domains = 0
+    prop_annotations_list = []  # This is required even though we don't have annotations
     
     for pid in protein_ids:
+        proteins_list.append(pid)
         interpro_domains = list(interpro_map.get(pid, set()))
         interpros_list.append(interpro_domains)
-        
-        if interpro_domains:
-            proteins_with_domains += 1
-        else:
-            proteins_without_domains += 1
+        prop_annotations_list.append([])  # Empty list since we don't have ground truth
     
-    update_status(f"Proteins with InterPro domains: {proteins_with_domains}")
-    update_status(f"Proteins without InterPro domains: {proteins_without_domains}")
-    
-    # Create DataFrame in the format expected by DeepGOZero
+    # Create DataFrame exactly as expected by the script
     df = pd.DataFrame({
-        'proteins': protein_ids,
-        'interpros': interpros_list
+        'proteins': proteins_list,
+        'interpros': interpros_list,
+        'prop_annotations': prop_annotations_list  # Required by the script
     })
     
-    # Save as pickle file
     df.to_pickle(output_pkl)
-    update_status(f"Created prediction DataFrame with {len(df)} proteins and saved to {output_pkl}")
-    
-    # Print some statistics
-    total_domains = sum(len(interpros) for interpros in interpros_list)
-    avg_domains = total_domains / len(protein_ids) if protein_ids else 0
-    update_status(f"Average InterPro domains per protein: {avg_domains:.2f}")
+    update_status(f"Created DataFrame with {len(df)} proteins in correct format")
     
     return len(df)
 
-def validate_deepgozero_setup(ontology):
-    """Validates that DeepGOZero files and data are available."""
+def validate_deepgozero_setup_fixed(ontology):
+    """Validates DeepGOZero setup with correct file names."""
     update_status("Validating DeepGOZero setup...")
-    
-    # Check if DeepGOZero directory exists
-    if not os.path.exists(DEEPGOZERO_PATH):
-        raise FileNotFoundError(f"DeepGOZero directory not found: {DEEPGOZERO_PATH}")
     
     # Check prediction script
     prediction_script = os.path.join(DEEPGOZERO_PATH, "deepgozero_predict.py")
@@ -163,68 +95,70 @@ def validate_deepgozero_setup(ontology):
     # Check ontology data directory
     ontology_data_path = os.path.join(DEEPGOZERO_DATA_ROOT, ontology)
     if not os.path.exists(ontology_data_path):
-        raise FileNotFoundError(f"DeepGOZero data directory for ontology '{ontology}' not found: {ontology_data_path}")
+        raise FileNotFoundError(f"Data directory not found: {ontology_data_path}")
     
-    # Check required model and terms files
+    # Check files with CORRECT names as used in deepgozero_predict.py
     model_file = os.path.join(ontology_data_path, "deepgozero.th")
     terms_file = os.path.join(ontology_data_path, "terms.pkl")
+    go_file = os.path.join(DEEPGOZERO_DATA_ROOT, "go.obo")
     
+    missing_files = []
     if not os.path.exists(model_file):
-        raise FileNotFoundError(f"DeepGOZero model file not found: {model_file}")
-    
+        missing_files.append(model_file)
     if not os.path.exists(terms_file):
-        raise FileNotFoundError(f"DeepGOZero terms file not found: {terms_file}")
+        missing_files.append(terms_file)
+    if not os.path.exists(go_file):
+        missing_files.append(go_file)
+    
+    if missing_files:
+        raise FileNotFoundError(f"Missing required files: {missing_files}")
     
     update_status("DeepGOZero setup validation successful")
-    return prediction_script, model_file, terms_file
+    return prediction_script
 
-def run_deepgozero_prediction(input_pkl, ontology, output_dir):
-    """Runs the DeepGOZero prediction script and saves the results."""
+def run_deepgozero_prediction_fixed(input_pkl, ontology, output_dir):
+    """Runs DeepGOZero with the correct parameters."""
     update_status(f"Running DeepGOZero prediction for ontology: {ontology}")
     
-    prediction_script, model_file, terms_file = validate_deepgozero_setup(ontology)
+    prediction_script = validate_deepgozero_setup_fixed(ontology)
     
+    # Use the EXACT parameters as defined in deepgozero_predict.py
     cmd = [
-        "python", prediction_script, 
-        "--data-root", DEEPGOZERO_DATA_ROOT,  # Point to your data directory
-        "--ont", ontology,                    # bp, mf, or cc
-        "--data-file", input_pkl,             # Your pickle file
-        "--device", "cpu"                     # Use CPU
+        "python", prediction_script,
+        "--data-root", DEEPGOZERO_DATA_ROOT,
+        "--ont", ontology,
+        "--data-file", input_pkl,
+        "--device", "cpu"
     ]
     
     update_status(f"Running command: {' '.join(cmd)}")
     
     try:
-        # Run with a reasonable timeout (30 minutes for most datasets)
         process = subprocess.run(
-            cmd, 
-            check=True, 
-            capture_output=True, 
-            text=True, 
+            cmd,
+            check=True,
+            capture_output=True,
+            text=True,
             cwd=DEEPGOZERO_PATH,
-            timeout=1800  # 30 minutes
+            timeout=1800
         )
         
         update_status("DeepGOZero prediction completed successfully")
-        return parse_and_save_results(process.stdout, ontology, input_pkl, output_dir)
+        return parse_and_save_results(process.stdout, ontology, output_dir)
         
-    except subprocess.TimeoutExpired:
-        error_message = "DeepGOZero prediction timed out after 30 minutes"
-        update_status(f"ERROR: {error_message}")
-        raise RuntimeError(error_message)
     except subprocess.CalledProcessError as e:
-        error_message = f"DeepGOZero failed with exit code {e.returncode}. STDERR: {e.stderr}"
-        update_status(f"ERROR: {error_message}")
+        update_status(f"ERROR: {e}")
+        update_status(f"STDERR: {e.stderr}")
+        update_status(f"STDOUT: {e.stdout}")
         raise e
 
-def parse_and_save_results(stdout, ontology, input_pkl, output_dir):
-    """Parses the prediction output from stdout and saves it to CSV files with analysis."""
-    update_status("Parsing and saving final predictions...")
+def parse_and_save_results(stdout, ontology, output_dir):
+    """Parse results from stdout and save to CSV."""
+    update_status("Parsing and saving predictions...")
     
     predictions = []
-    skipped_lines = 0
     
-    for line_num, line in enumerate(stdout.strip().split('\n'), 1):
+    for line in stdout.strip().split('\n'):
         line = line.strip()
         if not line:
             continue
@@ -233,132 +167,77 @@ def parse_and_save_results(stdout, ontology, input_pkl, output_dir):
         if len(parts) == 3 and parts[1].startswith('GO:'):
             try:
                 predictions.append({
-                    'Protein_ID': parts[0], 
-                    'GO_Term': parts[1], 
+                    'Protein_ID': parts[0],
+                    'GO_Term': parts[1],
                     'Score': float(parts[2])
                 })
-            except (ValueError, IndexError) as e:
-                skipped_lines += 1
-                update_status(f"Skipped malformed line {line_num}: {line} (Error: {e})")
-        else:
-            skipped_lines += 1
-    
-    if skipped_lines > 0:
-        update_status(f"Skipped {skipped_lines} malformed output lines")
+            except (ValueError, IndexError):
+                continue
     
     if not predictions:
-        update_status("WARNING: No valid predictions found in DeepGOZero output")
+        update_status("WARNING: No predictions found")
         return 0
     
-    # Create DataFrame and save results
+    # Save results
     df = pd.DataFrame(predictions)
-    
-    # Save main results
     csv_path = os.path.join(output_dir, f"predictions_{ontology}.csv")
     df.to_csv(csv_path, index=False)
+    
     update_status(f"Saved {len(df)} predictions to {csv_path}")
-    
-    # Create and save summary statistics
-    summary_path = os.path.join(output_dir, f"prediction_summary_{ontology}.txt")
-    with open(summary_path, 'w') as f:
-        f.write(f"DEEPGOZERO PREDICTION SUMMARY - {ontology.upper()} ONTOLOGY\n")
-        f.write("=" * 60 + "\n\n")
-        
-        f.write(f"Total predictions: {len(df)}\n")
-        f.write(f"Unique proteins with predictions: {df['Protein_ID'].nunique()}\n")
-        f.write(f"Unique GO terms predicted: {df['GO_Term'].nunique()}\n\n")
-        
-        f.write("Score distribution:\n")
-        f.write(f"  Minimum score: {df['Score'].min():.4f}\n")
-        f.write(f"  Maximum score: {df['Score'].max():.4f}\n")
-        f.write(f"  Mean score: {df['Score'].mean():.4f}\n")
-        f.write(f"  Median score: {df['Score'].median():.4f}\n\n")
-        
-        # Top proteins by number of predictions
-        protein_counts = df['Protein_ID'].value_counts().head(10)
-        f.write("Top 10 proteins by number of predictions:\n")
-        for protein, count in protein_counts.items():
-            f.write(f"  {protein}: {count} predictions\n")
-        f.write("\n")
-        
-        # Top GO terms by frequency
-        go_counts = df['GO_Term'].value_counts().head(10)
-        f.write("Top 10 most frequently predicted GO terms:\n")
-        for go_term, count in go_counts.items():
-            f.write(f"  {go_term}: {count} proteins\n")
-        f.write("\n")
-        
-        # High confidence predictions (score > 0.5)
-        high_conf = df[df['Score'] > 0.5]
-        f.write(f"High confidence predictions (score > 0.5): {len(high_conf)}\n")
-        f.write(f"Percentage of high confidence: {(len(high_conf)/len(df))*100:.1f}%\n")
-    
-    update_status(f"Saved prediction summary to {summary_path}")
-    
-    # Save high-confidence predictions separately
-    if len(high_conf) > 0:
-        high_conf_path = os.path.join(output_dir, f"high_confidence_predictions_{ontology}.csv")
-        high_conf.to_csv(high_conf_path, index=False)
-        update_status(f"Saved {len(high_conf)} high-confidence predictions to {high_conf_path}")
+    update_status(f"Unique proteins: {df['Protein_ID'].nunique()}")
+    update_status(f"Unique GO terms: {df['GO_Term'].nunique()}")
+    update_status(f"Score range: {df['Score'].min():.4f} to {df['Score'].max():.4f}")
     
     return len(df)
 
 @ck.command()
-@ck.option('--ontology', default=ONTOLOGY, type=ck.Choice(['mf', 'bp', 'cc']), 
-           help="Gene Ontology to predict: 'mf' (molecular function), 'bp' (biological process), 'cc' (cellular component)")
-@ck.option('--force-rerun', is_flag=True, help="Force re-running prediction even if output files exist.")
+@ck.option('--ontology', default=ONTOLOGY, type=ck.Choice(['mf', 'bp', 'cc']))
+@ck.option('--force-rerun', is_flag=True)
 def main(ontology, force_rerun):
-    """Main function to run DeepGOZero predictions using InterProScan results."""
+    """Fixed DeepGOZero prediction pipeline."""
     
-    # Clear status file
     with open(STATUS_FILE, "w") as f:
         f.write("")
     
-    update_status("DeepGOZero prediction pipeline starting...")
+    update_status("=== FIXED DeepGOZero Pipeline Starting ===")
     update_status(f"Ontology: {ontology}")
     
-    # Define file paths
-    interpro_output_tsv = os.path.join(OUTPUT_DIR, "interproscan_results.tsv")
-    prediction_input_pkl = os.path.join(OUTPUT_DIR, f"prediction_input_{ontology}.pkl")
-    prediction_output_csv = os.path.join(OUTPUT_DIR, f"predictions_{ontology}.csv")
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
     
-    # Check if results already exist and we're not forcing rerun
-    if not force_rerun and os.path.exists(prediction_output_csv):
-        update_status("DeepGOZero predictions already exist. Use --force-rerun to regenerate.")
+    # File paths
+    interpro_tsv = os.path.join(OUTPUT_DIR, "interproscan_results.tsv")
+    prediction_pkl = os.path.join(OUTPUT_DIR, f"prediction_input_{ontology}_fixed.pkl")
+    prediction_csv = os.path.join(OUTPUT_DIR, f"predictions_{ontology}.csv")
+    
+    if not force_rerun and os.path.exists(prediction_csv):
+        update_status("Predictions already exist. Use --force-rerun to regenerate.")
         return
     
     try:
-        # Step 1: Validate InterProScan results
-        validate_interproscan_results(interpro_output_tsv)
+        # Step 1: Validate InterProScan results exist
+        if not os.path.exists(interpro_tsv):
+            raise FileNotFoundError(f"InterProScan results not found: {interpro_tsv}")
         
-        # Step 2: Create prediction DataFrame (skip if exists and not forcing rerun)
-        if force_rerun or not os.path.exists(prediction_input_pkl):
-            protein_count = create_prediction_dataframe(FASTA_FILE, interpro_output_tsv, prediction_input_pkl)
+        # Step 2: Create properly formatted DataFrame
+        if force_rerun or not os.path.exists(prediction_pkl):
+            protein_count = create_prediction_dataframe_fixed(FASTA_FILE, interpro_tsv, prediction_pkl)
         else:
-            update_status("STEP 2: SKIPPED - Found existing prediction PKL file.")
-            # Load existing pkl to get protein count
-            df = pd.read_pickle(prediction_input_pkl)
+            df = pd.read_pickle(prediction_pkl)
             protein_count = len(df)
-            update_status(f"Loaded existing prediction data with {protein_count} proteins")
+            update_status(f"Using existing prediction data: {protein_count} proteins")
         
-        # Step 3: Run DeepGOZero prediction
-        prediction_count = run_deepgozero_prediction(prediction_input_pkl, ontology, OUTPUT_DIR)
+        # Step 3: Run DeepGOZero
+        prediction_count = run_deepgozero_prediction_fixed(prediction_pkl, ontology, OUTPUT_DIR)
         
-        # Final summary
+        # Summary
         update_status("=" * 50)
-        update_status("DEEPGOZERO PIPELINE COMPLETED SUCCESSFULLY!")
-        update_status(f"Input proteins: {protein_count}")
-        update_status(f"Total predictions: {prediction_count}")
-        update_status(f"Ontology: {ontology}")
-        update_status(f"Results saved in: {OUTPUT_DIR}")
+        update_status("FIXED PIPELINE COMPLETED!")
+        update_status(f"Proteins processed: {protein_count}")
+        update_status(f"Predictions generated: {prediction_count}")
         update_status("=" * 50)
         
-    except FileNotFoundError as e:
-        update_status(f"ERROR: Required file not found - {str(e)}")
-        update_status("Make sure you have run the InterProScan script first!")
-        raise
     except Exception as e:
-        update_status(f"ERROR: Pipeline failed - {str(e)}")
+        update_status(f"ERROR: {e}")
         raise
 
 if __name__ == "__main__":
