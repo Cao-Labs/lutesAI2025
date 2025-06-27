@@ -2,7 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # Load the CSV
-df = pd.read_csv("your_file.csv")
+df = pd.read_csv("training_log.csv")
 
 # Filter every 5000th episode
 df_filtered = df[df['episode'] % 5000 == 0]
