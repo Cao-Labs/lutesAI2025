@@ -11,7 +11,7 @@ import click as ck
 # ==============================================================================
 
 # 1. Path to your input protein sequences (same as used for InterProScan)
-FASTA_FILE = "/data/summer2020/naufal/testing_sequences.fasta"
+FASTA_FILE = "/data/summer2020/Boen/benchmark_testing_sequences.fasta"
 
 # 2. Path to the cloned DeepGOZero repository
 DEEPGOZERO_PATH = "/data/shared/tools/deepgozero"
