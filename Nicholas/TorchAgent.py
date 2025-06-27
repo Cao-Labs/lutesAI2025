@@ -35,8 +35,8 @@ class PolicyNetwork(nn.Module):
 
     def forward(self, x):
         return self.model(x)
-    def to_device(tensor, device):
-        return tensor.to(device) if isinstance(tensor, torch.Tensor) else tensor
+    # def to_device(tensor, device):
+    #     return tensor.to(device) if isinstance(tensor, torch.Tensor) else tensor
 
 # --------- 2. Train with REINFORCE ---------
 def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', training_log='training_log.csv'):
@@ -62,9 +62,7 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
 
     for episode in range(episodes):
         obs = env.reset()
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        policy.to(device)
-        sequence = torch.tensor(obs["sequence"], dtype=torch.long).unsqueeze(0).to(device)
+        sequence = torch.tensor(obs["sequence"], dtype=torch.long, device=device).unsqueeze(0)
         probs = policy(sequence).squeeze(0)
 
         dist = torch.distributions.Bernoulli(probs)
@@ -118,33 +116,36 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
 
 
 def evaluate(policy, env, episodes=20, episode_idx=0, best_avg_reward=None):
+    policy.eval()
     total_reward = 0
+    with torch.no_grad():
+        for _ in range(episodes):
+            obs = env.reset()
+            sequence = torch.tensor(obs["sequence"], dtype=torch.long, device=device).unsqueeze(0)
+            probs = policy(sequence).squeeze(0)
 
-    for _ in range(episodes):
-        obs = env.reset()
-        sequence = torch.tensor(obs["sequence"], dtype=torch.long).unsqueeze(0)
-        probs = policy(sequence).squeeze(0)
+            action = (probs > 0.5).int().cpu().numpy().astype(np.int8)
+            _, reward, _, _ = env.step(action)
+            total_reward += reward
 
-        action = (probs > 0.5).int().cpu().numpy().astype(np.int8)
-        _, reward, _, _ = env.step(action)
-        total_reward += reward
 
     avg_reward = total_reward / episodes
     print(f"✅ Evaluation at Episode {episode_idx}: Avg Reward = {avg_reward:.2f}")
 
     # Save best model
     if best_avg_reward is None or avg_reward > best_avg_reward:
-        best_path = os.path.join(BEST_MODEL_DIR, f"best_model_episode_{episode_idx}.pt")
-        torch.save(policy.state_dict(), best_path)
-        print(f"💾 Best model saved to {best_path}")
-        best_avg_reward = avg_reward  # ✅ Update best reward
+        path = os.path.join(BEST_MODEL_DIR, f"best_model_episode_{episode_idx}.pt")
+        torch.save(policy.state_dict(), path)
+        print(f"💾 Saved best model to {path}")
+        best_avg_reward = avg_reward
+
+    policy.train()
 
     return avg_reward, best_avg_reward  # ✅ Always return both
 
 # --------- 3. Run Everything ---------
 if __name__ == "__main__":
     env = GOEnv(protein_data=protein_data_for_env, go_terms=all_go_terms)
-
     policy = PolicyNetwork(input_size=512, output_size=env.max_choices).to(device)
     optimizer = optim.Adam(policy.parameters(), lr=1e-4)
 
