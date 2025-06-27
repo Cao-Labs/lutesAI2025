@@ -1,4 +1,3 @@
-import random
 import re
 import gym
 import numpy as np
@@ -60,7 +59,13 @@ class GOEnv(gym.Env):
         self.go_terms = go_terms  # list of all possible GO terms
         self.max_choices = max_choices
         self.seq_length = seq_length
+        self.protein_ids = list(self.protein_data.keys())  # Precompute once
+        self.go_term_set = set(self.go_terms)  # Precompute once
 
+        self.encoded_proteins = {
+            pid: (self.encode_sequence(seq), go_terms)
+            for pid, (seq, go_terms) in self.protein_data.items()
+        }
         # Observation: encoded protein sequence
         self.observation_space = spaces.Box(low=0, high=22, shape=(seq_length,), dtype=np.int32)
 
@@ -74,7 +79,7 @@ class GOEnv(gym.Env):
     def encode_sequence(self, sequence):
         # Simplified amino acid to integer encoding
         aa_map = {aa: idx for idx, aa in enumerate("ACDEFGHIKLMNPQRSTVWY")}
-        encoded = [aa_map.get(aa, 20) for aa in sequence[:self.seq_length]]
+        # encoded = [aa_map.get(aa, 20) for aa in sequence[:self.seq_length]]
         unknown_token = 20
         pad_token = 21
 
@@ -82,17 +87,23 @@ class GOEnv(gym.Env):
         return np.pad(encoded, (0, self.seq_length - len(encoded)), constant_values=pad_token)
 
     def reset(self):
-        protein_id, (seq, true_go_terms) = random.choice(list(self.protein_data.items()))
-        self.current_sequence = self.encode_sequence(seq)
+        # Choose a random protein ID from the precomputed list
+        protein_id = random.choice(self.protein_ids)
+
+
+        # Encode sequence and store ground truth
+        self.current_sequence, true_go_terms = self.encoded_proteins[protein_id]
         self.current_truth = true_go_terms
+
         # Ensure true GO terms are unique
         true_terms = set(true_go_terms)
-        # Sample distractors from GO terms that are NOT in the true set
-        possible_distractors = list(set(self.go_terms) - true_terms)
+        # Use precomputed set of all GO terms (set(self.go_terms)) -> stored as self.go_term_set
+        possible_distractors = list(self.go_term_set - true_terms)
         # Calculate how many more terms we need
         num_distractors = self.max_choices - len(true_terms)
-        # Sample without replacement to avoid duplicates
-        distractors = random.sample(possible_distractors, min(num_distractors, len(possible_distractors)))
+        # Sample without replacement
+        distractors = list(
+            np.random.choice(possible_distractors, size=min(num_distractors, len(possible_distractors)), replace=False))
         # Combine and shuffle
         self.current_go_choices = list(true_terms.union(distractors))
         random.shuffle(self.current_go_choices)
@@ -103,7 +114,8 @@ class GOEnv(gym.Env):
         }
 
     def step(self, action):
-        selected_terms = [self.current_go_choices[i] for i in range(self.max_choices) if action[i] == 1]
+        selected_indices = np.nonzero(action)[0]
+        selected_terms = [self.current_go_choices[i] for i in selected_indices]
         correct = set(selected_terms) & set(self.current_truth)
         incorrect = set(selected_terms) - correct
         incorrectScore = len(incorrect) *.25
