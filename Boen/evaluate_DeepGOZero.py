@@ -166,8 +166,8 @@ def validate_deepgozero_setup(ontology):
         raise FileNotFoundError(f"DeepGOZero data directory for ontology '{ontology}' not found: {ontology_data_path}")
     
     # Check required model and terms files
-    model_file = os.path.join(ontology_data_path, "deepgozero_zero_10.th")
-    terms_file = os.path.join(ontology_data_path, "terms_zero_10.pkl")
+    model_file = os.path.join(ontology_data_path, "deepgozero.th")
+    terms_file = os.path.join(ontology_data_path, "terms.pkl")
     
     if not os.path.exists(model_file):
         raise FileNotFoundError(f"DeepGOZero model file not found: {model_file}")
