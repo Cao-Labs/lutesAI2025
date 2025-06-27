@@ -1,7 +1,7 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 
-df = pd.read_csv('training_log.csv')
+df = pd.read_csv('training_log_test.csv')
 
 df.plot( x = 'episode', y = 'reward')
 
