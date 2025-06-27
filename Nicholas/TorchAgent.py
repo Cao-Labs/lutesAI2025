@@ -39,7 +39,7 @@ class PolicyNetwork(nn.Module):
     #     return tensor.to(device) if isinstance(tensor, torch.Tensor) else tensor
 
 # --------- 2. Train with REINFORCE ---------
-def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', training_log='training_log.csv'):
+def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', training_log='training_log_test.csv'):
     startTime = time.time()
     baseline = 0.0
     best_avg_reward = -float('inf')
@@ -150,4 +150,4 @@ if __name__ == "__main__":
     policy = PolicyNetwork(input_size=512, output_size=env.max_choices).to(device)
     optimizer = optim.Adam(policy.parameters(), lr=1e-4)
 
-    train(env, policy, optimizer, episodes=50000)
+    train(env, policy, optimizer, episodes=1000)
