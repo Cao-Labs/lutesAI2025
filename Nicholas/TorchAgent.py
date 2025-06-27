@@ -39,7 +39,7 @@ class PolicyNetwork(nn.Module):
     #     return tensor.to(device) if isinstance(tensor, torch.Tensor) else tensor
 
 # --------- 2. Train with REINFORCE ---------
-def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', training_log='training_log_test.csv'):
+def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', training_log='training_log.csv'):
     startTime = time.time()
     baseline = 0.0
     best_avg_reward = -float('inf')
@@ -58,7 +58,7 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
     if not os.path.exists(training_log):
         with open(training_log, mode='w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(['episode', 'reward', 'time'])
+            writer.writerow(['episode', 'reward', 'baseline','advantage','loss','time'])
 
     for episode in range(episodes):
         obs = env.reset()
@@ -95,7 +95,7 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
 
         with open(training_log, mode='a', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow([episode, reward, time.time() - startTime])
+            writer.writerow([episode, reward,baseline,advantage,loss, time.time() - startTime])
         if episode > 0 and episode % Reset_Interval == 0:
             reward_sum = 0.0
             reward_sq_sum = 0.0
@@ -150,4 +150,4 @@ if __name__ == "__main__":
     policy = PolicyNetwork(input_size=512, output_size=env.max_choices).to(device)
     optimizer = optim.Adam(policy.parameters(), lr=1e-4)
 
-    train(env, policy, optimizer, episodes=1000)
+    train(env, policy, optimizer, episodes=75000)
