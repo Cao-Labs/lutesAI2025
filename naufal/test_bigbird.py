@@ -1,32 +1,27 @@
 import os
 import torch
 import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
 from transformers import BigBirdModel, BigBirdConfig
+from collections import defaultdict
 from tqdm import tqdm
 
-# === Paths and Config ===
-TEST_DIR = "/data/summer2020/naufal/testing_pca"
-GO_MAPPING_FILE = "/data/summer2020/naufal/matched_ids_with_go.txt"
-MODEL_PATH = "/data/shared/github/lutesAI2025/naufal/bigbird_finetuned.pt"
-OUTPUT_FILE = "/data/summer2020/naufal/test_pred.txt"
+# === Dataset Class ===
+class ProteinTestDataset(Dataset):
+    def __init__(self, embedding_dir):
+        self.embedding_dir = embedding_dir
+        self.ids = [fname[:-3] for fname in os.listdir(embedding_dir) if fname.endswith(".pt")]
 
-DEVICE = torch.device("cuda:1" if torch.cuda.device_count() > 1 else "cuda:0")
-INPUT_DIM = 512
-MAX_LEN = 512
+    def __len__(self):
+        return len(self.ids)
 
-# === Load GO vocabulary from training mapping file ===
-go_terms_set = set()
-with open(GO_MAPPING_FILE, "r") as f:
-    for line in f:
-        try:
-            _, terms = line.strip().split("\t")
-            go_terms_set.update(terms.split(";"))
-        except:
-            continue
-go_vocab = {idx: term for idx, term in enumerate(sorted(go_terms_set))}
-NUM_LABELS = len(go_vocab)
+    def __getitem__(self, idx):
+        pid = self.ids[idx]
+        embedding = torch.load(os.path.join(self.embedding_dir, f"{pid}.pt"))  # [512, 512]
+        attention_mask = (embedding.sum(dim=1) != 0).long()  # [512]
+        return pid, embedding, attention_mask
 
-# === Define the model class ===
+# === Model Definition ===
 class BigBirdProteinModel(nn.Module):
     def __init__(self, input_dim, target_dim, max_len):
         super().__init__()
@@ -50,46 +45,61 @@ class BigBirdProteinModel(nn.Module):
         )
 
     def forward(self, x, attention_mask):
-        x = self.project(x)
+        x = self.project(x)  # [B, L, 768]
         outputs = self.bigbird(inputs_embeds=x, attention_mask=attention_mask)
-        cls_output = outputs.last_hidden_state[:, 0, :]
-        logits = self.classifier(cls_output)
+        cls_output = outputs.last_hidden_state[:, 0, :]  # [B, 768]
+        logits = self.classifier(cls_output)  # [B, num_labels]
         return logits
 
-# === Load trained model ===
-model = BigBirdProteinModel(INPUT_DIM, NUM_LABELS, MAX_LEN).to(DEVICE)
-model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
-model.eval()
+# === Load GO Vocabulary from Training File ===
+def load_go_vocab(go_mapping_file):
+    go_terms_set = set()
+    with open(go_mapping_file, "r") as f:
+        for line in f:
+            _, terms = line.strip().split("\t")
+            term_list = terms.split(";")
+            go_terms_set.update(term_list)
+    go_vocab = {idx: go_term for idx, go_term in enumerate(sorted(go_terms_set))}
+    return go_vocab
 
-# === Prediction loop ===
-with open(OUTPUT_FILE, "w") as out_f:
-    files = sorted([f for f in os.listdir(TEST_DIR) if f.endswith(".pt")])
-    for idx, fname in enumerate(tqdm(files, desc="Predicting")):
-        pid = fname[:-3]
-        path = os.path.join(TEST_DIR, fname)
+# === Prediction Function ===
+def predict():
+    # === Config ===
+    embedding_dir = "/data/summer2020/naufal/testing_pca"
+    go_mapping_file = "/data/summer2020/naufal/matched_ids_with_go.txt"  # TRAINING MAPPING
+    model_path = "/data/shared/github/lutesAI2025/naufal/bigbird_finetuned.pt"
+    output_file = "/data/summer2020/naufal/test_pred.txt"
+    batch_size = 1
+    device = torch.device("cuda:1" if torch.cuda.device_count() > 1 else "cuda:0")
 
-        try:
-            embedding = torch.load(path).to(DEVICE)  # [512, 512]
-            if embedding.dim() != 2 or embedding.shape != (512, 512):
-                print(f"[!] Skipped {pid}: invalid shape {embedding.shape}")
-                continue
+    # === Load GO vocab ===
+    go_vocab = load_go_vocab(go_mapping_file)
+    idx_to_go = go_vocab
+    num_labels = len(idx_to_go)
 
-            attention_mask = (embedding.sum(dim=1) != 0).long()
-            embedding = embedding.unsqueeze(0)        # [1, 512, 512]
-            attention_mask = attention_mask.unsqueeze(0)  # [1, 512]
+    # === Load model ===
+    model = BigBirdProteinModel(input_dim=512, target_dim=num_labels, max_len=512).to(device)
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.eval()
 
+    # === Load test data ===
+    dataset = ProteinTestDataset(embedding_dir)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+
+    with open(output_file, "w") as out_f:
+        for i, (pid, x, attn_mask) in enumerate(tqdm(dataloader)):
+            x, attn_mask = x.to(device), attn_mask.to(device)
             with torch.no_grad():
-                logits = model(embedding, attention_mask)
-                probs = torch.sigmoid(logits)[0]
-                predicted_indices = (probs > 0.5).nonzero(as_tuple=True)[0]
-                predicted_terms = [go_vocab[i.item()] for i in predicted_indices]
+                logits = model(x, attn_mask)
+                preds = torch.sigmoid(logits) > 0.5
 
-            out_f.write(f"{pid}\t{';'.join(predicted_terms)}\n")
+            pred_go_terms = [idx_to_go[idx] for idx in torch.where(preds[0])[0].tolist()]
+            out_f.write(f"{pid[0]}\t{';'.join(pred_go_terms)}\n")
 
-            if idx == 0 or (idx + 1) % 10000 == 0:
-                print(f"[✓] Wrote predictions for {idx + 1:,} proteins")
+            if i == 0 or (i + 1) % 1000 == 0:
+                print(f"[✓] Predicted {i + 1:,} proteins")
 
-        except Exception as e:
-            print(f"[!] Failed on {pid}: {e}")
+    print(f"[✓] Predictions written to: {output_file}")
 
-print(f"[✓] All predictions saved to {OUTPUT_FILE}")
+if __name__ == "__main__":
+    predict()
