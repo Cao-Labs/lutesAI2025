@@ -2,7 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # Load data
-df = pd.read_csv('training_log.csv')
+df = pd.read_csv('training_log_test.csv')
 ef = pd.read_csv('eval_log.csv')
 
 # First: base plot with full training data
