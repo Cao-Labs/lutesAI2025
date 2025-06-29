@@ -7,7 +7,7 @@ ef = pd.read_csv('eval_log.csv')
 
 # First: base plot with full training data
 plt.figure(figsize=(10, 5))
-plt.plot(df['episode'], df['reward'], label='Training', alpha=0.7)
+plt.plot(df['episode'], df['reward'], label='reward', alpha=0.7)
 
 # Now: overlay eval data, but only every 20,000th point
 df_sampled = df[df['episode'] % 10000 == 0]
