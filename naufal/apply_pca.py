@@ -6,7 +6,7 @@ from tqdm import tqdm
 from sklearn.decomposition import PCA
 
 # === Paths ===
-SOURCE_DIR = "/data/summer2020/naufal/testing_embeddings"
+SOURCE_DIR = "/data/summer2020/naufal/testing_normalized"
 DEST_DIR = "/data/summer2020/naufal/testing_pca"
 os.makedirs(DEST_DIR, exist_ok=True)
 
