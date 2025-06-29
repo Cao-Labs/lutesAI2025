@@ -3,7 +3,7 @@ import torch
 
 # === Config ===
 EMBEDDINGS_DIR = "/data/summer2020/naufal/testing_embeddings"
-FEATURES_FILE = "/data/summer2020/naufal/features_dssp_direct.txt"
+FEATURES_FILE = "/data/summer2020/naufal/testing_features.txt"
 OUTPUT_DIR = "/data/summer2020/naufal/testing_normalized"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
