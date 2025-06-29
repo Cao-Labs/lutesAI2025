@@ -13,7 +13,7 @@ plt.plot(df['episode'], df['reward'], label='Training', alpha=0.7)
 df_sampled = df[df['episode'] % 200000 == 0]
 
 # Overlay sampled evaluation data as a dotted red line or points
-plt.plot(df['episode'], df_sampled['selected_amount'], label='Log (every 20k)', linestyle='--', color='red', marker='o')
+plt.plot( df_sampled['episode'], df_sampled['selected_amount'], label='Log (every 20k)', linestyle='--', color='red', marker='o')
 
 # Labels and legend
 plt.xlabel('Episode')
