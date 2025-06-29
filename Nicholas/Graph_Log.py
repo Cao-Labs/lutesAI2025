@@ -10,10 +10,10 @@ plt.figure(figsize=(10, 5))
 plt.plot(df['episode'], df['reward'], label='Training', alpha=0.7)
 
 # Now: overlay eval data, but only every 20,000th point
-df_sampled = df[df['episode'] % 20000 == 0]
+df_sampled = df[df['episode'] % 10000 == 0]
 
 # Overlay sampled evaluation data as a dotted red line or points
-plt.plot( df_sampled['episode'], df_sampled['selected_amount'], label='Log (every 20k)', linestyle='--', color='red', marker='o')
+plt.plot( df_sampled['episode'], df_sampled['selected_amount'], label='Number of answers', linestyle='--', color='red', marker='o')
 
 # Labels and legend
 plt.xlabel('Episode')
