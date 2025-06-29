@@ -14,7 +14,7 @@ DEST_PDB_DIR = "/data/summer2020/Boen/benchmark_testing_pdbs"
 RENAMED_PDB_DIR = "/data/summer2020/Boen/TransFun/data/benchmark_testing_pdbs_renamed"
 
 # FASTA file containing the sequences you want to predict
-FASTA_FILE = "/data/summer2020/Boen/TransFun/data/benchmark_testing_sequences.fasta"
+FASTA_FILE = "/data/summer2020/Boen/benchmark_testing_sequences.fasta"
 
 # UniProt ID mapping file
 MAPPING_FILE = "/data/shared/databases/UniProt2025/idmapping_uni.txt"
