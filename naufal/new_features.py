@@ -1,57 +1,58 @@
 import os
 import subprocess
-from tempfile import NamedTemporaryFile
+from tqdm import tqdm
 
-# === File paths ===
-structure_file = "/data/summer2020/naufal/protein_structures.txt"
-id_file = "/data/summer2020/naufal/matched_ids.txt"
-fasta_file = "/data/summer2020/naufal/training_data/protein_sequences.fasta"
-output_file = "/data/summer2020/naufal/features_seq_aligned_to_fasta.txt"
-dssp_exec = "/data/shared/tools/DeepQA/tools/dsspcmbi"
+# === Paths ===
+PDB_DIR = "/data/summer2020/naufal/testing_pdbs"
+ID_MAPPING_FILE = "/data/shared/databases/UniProt2025/idmapping_uni.txt"
+OUTPUT_FILE = "/data/summer2020/naufal/testing_features.txt"
+DSSP_EXEC = "/data/shared/tools/DeepQA/tools/dsspcmbi"
 
-# === Load sequences from FASTA ===
-sequence_dict = {}
-with open(fasta_file, "r") as f:
-    current_id = None
-    seq = []
-    for line in f:
-        line = line.strip()
-        if line.startswith(">"):
-            if current_id:
-                sequence_dict[current_id] = "".join(seq)
-            current_id = line[1:]
-            seq = []
-        else:
-            seq.append(line)
-    if current_id:
-        sequence_dict[current_id] = "".join(seq)
-
-# === Load protein IDs ===
-with open(id_file, "r") as f:
-    matched_ids = [line.strip() for line in f if line.strip()]
+# === Ensure output directory exists ===
+os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
 
 # === Output file ===
-with open(output_file, "w") as out_f:
-    current_lines = []
-    protein_index = 0
+with open(OUTPUT_FILE, "w") as out_f:
+    pdb_files = sorted(f for f in os.listdir(PDB_DIR) if f.endswith(".pdb"))
+    print(f"[✓] Found {len(pdb_files)} PDB files")
 
-    def run_dssp_by_index(internal_id, pdb_lines, sequence):
-        # Write temp PDB
-        with NamedTemporaryFile(mode='w+', suffix=".pdb", delete=False) as tmp_pdb:
-            tmp_pdb.writelines(pdb_lines)
-            tmp_pdb_path = tmp_pdb.name
+    count = 0
+    for pdb_file in tqdm(pdb_files, desc="Processing PDBs"):
+        # Extract UniProt accession from filename: AF-<accession>-F1-model_v4.pdb
+        try:
+            accession = pdb_file.split("-")[1]
+        except Exception:
+            print(f"[!] Skipped malformed filename: {pdb_file}")
+            continue
 
-        tmp_dssp_path = tmp_pdb_path + ".dssp"
+        # === Map accession → internal ID (line-by-line) ===
+        internal_id = None
+        with open(ID_MAPPING_FILE, "r") as f:
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) >= 2 and parts[0] == accession:
+                    internal_id = parts[-1]
+                    break
+
+        if not internal_id:
+            print(f"[!] Skipped {accession}: Not found in mapping")
+            continue
+
+        # === Run DSSP ===
+        pdb_path = os.path.join(PDB_DIR, pdb_file)
+        tmp_dssp_path = pdb_path + ".dssp"
 
         try:
-            result = subprocess.run(
-                [dssp_exec, tmp_pdb_path, tmp_dssp_path],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            subprocess.run(
+                [DSSP_EXEC, pdb_path, tmp_dssp_path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
             )
 
-            if result.returncode != 0 or not os.path.exists(tmp_dssp_path):
-                print(f"Skipped {internal_id}: DSSP failed")
-                return
+            if not os.path.exists(tmp_dssp_path):
+                print(f"[!] DSSP failed for {internal_id}")
+                continue
 
             with open(tmp_dssp_path, "r") as dssp_f:
                 lines = dssp_f.readlines()
@@ -62,10 +63,9 @@ with open(output_file, "w") as out_f:
                     start = i + 1
                     break
             if start is None:
-                print(f"Skipped {internal_id}: DSSP output malformed")
-                return
+                print(f"[!] DSSP malformed for {internal_id}")
+                continue
 
-            # Extract DSSP SS/RSA per index
             ss_list = []
             rsa_list = []
             for line in lines[start:]:
@@ -77,41 +77,22 @@ with open(output_file, "w") as out_f:
                     rsa = float(line[35:38].strip())
                     ss_list.append(ss)
                     rsa_list.append(rsa)
-                except:
+                except Exception:
                     continue
 
-            # Align by sequence index
             out_f.write(f"# {internal_id}\n")
-            for i in range(len(sequence)):
-                if i < len(ss_list):
-                    out_f.write(f"{ss_list[i]}\t{rsa_list[i]:.3f}\n")
-                else:
-                    out_f.write("X\t-1.000\n")
+            for ss, rsa in zip(ss_list, rsa_list):
+                out_f.write(f"{ss}\t{rsa:.3f}\n")
+
+            count += 1
+            if count == 1 or count % 10000 == 0:
+                print(f"[✓] Processed {count:,} proteins")
 
         finally:
-            os.remove(tmp_pdb_path)
             if os.path.exists(tmp_dssp_path):
                 os.remove(tmp_dssp_path)
 
-    # === Process structures ===
-    with open(structure_file, "r") as sf:
-        for line in sf:
-            if line.startswith("ATOM") and line[6:11].strip() == "1":
-                if current_lines:
-                    if protein_index < len(matched_ids):
-                        pid = matched_ids[protein_index]
-                        if pid in sequence_dict:
-                            run_dssp_by_index(pid, current_lines, sequence_dict[pid])
-                        protein_index += 1
-                    current_lines = []
-            current_lines.append(line)
+print(f"[✓] All DSSP features saved to {OUTPUT_FILE}")
 
-        # Final protein
-        if current_lines and protein_index < len(matched_ids):
-            pid = matched_ids[protein_index]
-            if pid in sequence_dict:
-                run_dssp_by_index(pid, current_lines, sequence_dict[pid])
-
-print("Done: Aligned DSSP features written to", output_file)
 
 

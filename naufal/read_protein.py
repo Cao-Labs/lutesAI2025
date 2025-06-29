@@ -3,7 +3,7 @@ import numpy as np
 import os
 
 # Path to the file
-FILE = "/data/archives/naufal/final_embeddings/PF2R_MOUSE.pt"
+FILE = "/data/summer2020/naufal/testing_normalized/SYS_BACC7.pt"
 
 # Load the tensor
 if not os.path.exists(FILE):
