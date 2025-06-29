@@ -2,22 +2,45 @@ import os
 import subprocess
 from tempfile import NamedTemporaryFile
 
-# === File paths ===
+# === Paths ===
 PDB_DIR = "/data/summer2020/naufal/testing_pdbs"
+ID_MAPPING_FILE = "/data/shared/databases/UniProt2025/idmapping_uni.txt"
 OUTPUT_FILE = "/data/summer2020/naufal/testing_features.txt"
 DSSP_EXEC = "/data/shared/tools/DeepQA/tools/dsspcmbi"
 
-# === Output writer ===
+# === Step 1: Load UniProt Accession → Internal ID mapping ===
+accession_to_internal = {}
+with open(ID_MAPPING_FILE, "r") as f:
+    for line in f:
+        parts = line.strip().split()
+        if len(parts) == 3:
+            accession, _, internal = parts
+            accession_to_internal[accession] = internal
+
+print(f"[✓] Loaded {len(accession_to_internal)} accession → internal ID mappings")
+
+# === Step 2: Process PDB files and run DSSP ===
 with open(OUTPUT_FILE, "w") as out_f:
     pdb_files = sorted(f for f in os.listdir(PDB_DIR) if f.endswith(".pdb"))
-    print(f"[✓] Found {len(pdb_files)} PDB files.")
+    print(f"[✓] Found {len(pdb_files)} PDB files")
 
     for pdb_file in pdb_files:
-        internal_id = pdb_file[:-4]  # remove .pdb
-        pdb_path = os.path.join(PDB_DIR, pdb_file)
+        # Extract UniProt accession from PDB filename
+        # Format: AF-<accession>-F1-model_v4.pdb
+        try:
+            parts = pdb_file.split("-")
+            accession = parts[1]
+            if accession not in accession_to_internal:
+                print(f"[!] Skipped {pdb_file}: accession {accession} not in mapping")
+                continue
+            internal_id = accession_to_internal[accession]
+        except:
+            print(f"[!] Skipped malformed PDB filename: {pdb_file}")
+            continue
 
-        # Run DSSP
+        pdb_path = os.path.join(PDB_DIR, pdb_file)
         tmp_dssp_path = pdb_path + ".dssp"
+
         try:
             result = subprocess.run(
                 [DSSP_EXEC, pdb_path, tmp_dssp_path],
@@ -27,7 +50,7 @@ with open(OUTPUT_FILE, "w") as out_f:
             )
 
             if result.returncode != 0 or not os.path.exists(tmp_dssp_path):
-                print(f"[!] Skipped {internal_id}: DSSP failed")
+                print(f"[!] DSSP failed for {internal_id}")
                 continue
 
             with open(tmp_dssp_path, "r") as dssp_f:
@@ -39,10 +62,9 @@ with open(OUTPUT_FILE, "w") as out_f:
                     start = i + 1
                     break
             if start is None:
-                print(f"[!] Skipped {internal_id}: DSSP output malformed")
+                print(f"[!] DSSP output malformed for {internal_id}")
                 continue
 
-            # Parse DSSP output
             ss_list = []
             rsa_list = []
             for line in lines[start:]:
@@ -57,7 +79,6 @@ with open(OUTPUT_FILE, "w") as out_f:
                 except:
                     continue
 
-            # Write to output file
             out_f.write(f"# {internal_id}\n")
             for ss, rsa in zip(ss_list, rsa_list):
                 out_f.write(f"{ss}\t{rsa:.3f}\n")
@@ -68,5 +89,5 @@ with open(OUTPUT_FILE, "w") as out_f:
             if os.path.exists(tmp_dssp_path):
                 os.remove(tmp_dssp_path)
 
-print(f"[✓] All features saved to {OUTPUT_FILE}")
+print(f"[✓] All DSSP features saved to {OUTPUT_FILE}")
 
