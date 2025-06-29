@@ -15,16 +15,17 @@ from preprocessing.utils import load_ckp, get_sequence_from_pdb, create_seqrecor
     generate_bulk_embedding, pickle_load, fasta_to_dictionary
 
 parser = argparse.ArgumentParser(description=" Predict protein functions with TransFun ", epilog=" Thank you !!!")
-parser.add_argument('--data-path', type=str, default="data", help="Path to data files")
-parser.add_argument('--ontology', type=str, default="cellular_component", help="Path to data files")
+parser.add_argument('--data-path', type=str, default="/data/summer2020/Boen/TransFun/data", help="Path to data files")
+parser.add_argument('--ontology', type=str, default="cellular_component", help="Ontology to predict")
 parser.add_argument('--no-cuda', default=False, help='Disables CUDA training.')
 parser.add_argument('--batch-size', default=10, help='Batch size.')
 parser.add_argument('--input-type', choices=['fasta', 'pdb'], default="fasta",
                     help='Input Data: fasta file or PDB files')
-parser.add_argument('--fasta-path', default="sequence.fasta", help='Path to Fasta')
-parser.add_argument('--pdb-path', default="alphafold", help='Path to directory of PDBs')
+parser.add_argument('--fasta-path', default="benchmark_testing_sequences.fasta", help='Path to Fasta')
+parser.add_argument('--pdb-path', default="benchmark_testing_pdbs_renamed", help='Path to directory of PDBs')
 parser.add_argument('--cut-off', type=float, default=0.0, help="Cut of to report function")
 parser.add_argument('--output', type=str, default="output", help="File to save output")
+parser.add_argument('--skip-embedding', action='store_true', default=True, help="Skip embedding generation (embeddings already exist)")
 
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -48,7 +49,7 @@ FUNC_DICT = {
     'biological_process': 'GO:0008150'
 }
 
-print("Predicting proteins")
+print("Predicting proteins (skipping embedding generation)")
 
 def create_fasta(proteins):
     fasta = []
@@ -78,115 +79,105 @@ def write_to_file(data, output):
                 fp.write('%s %s %s\n' % (protein, go_term, score))
 
 
-def generate_embeddings(fasta_path):
-    def merge_pts(keys, fasta):
-        embeddings = [0, 32, 33]
-        for protein in keys:
-            fasta_dic = fasta_to_dictionary(fasta)
-            tmp = []
-            for level in range(keys[protein]):
-                os_path = "{}/esm/{}_{}.pt".format(args.data_path, protein, level)
-                tmp.append(torch.load(os_path))
-
-            data = {'representations': {}, 'mean_representations': {}}
-            for index in tmp:
-                for rep in embeddings:
-                    assert torch.equal(index['mean_representations'][rep], torch.mean(index['representations'][rep], dim=0))
-
-                    if rep in data['representations']:
-                        data['representations'][rep] = torch.cat((data['representations'][rep], index['representations'][rep]))
-                    else:
-                        data['representations'][rep] = index['representations'][rep]
-
-            for emb in embeddings:
-                assert len(fasta_dic[protein][3]) == data['representations'][emb].shape[0]
-
-            for rep in embeddings:
-                data['mean_representations'][rep] = torch.mean(data['representations'][rep], dim=0)
-
-            torch.save(data, "{}/esm/{}.pt".format(args.data_path, protein))
-
-    def crop_fasta(record):
-        splits = []
-        keys = {}
-        main_id = record.id
-        keys[main_id] = int(len(record.seq) / 1021) + 1
-        for pos in range(int(len(record.seq) / 1021) + 1):
-            id = "{}_{}".format(main_id, pos)
-            seq = str(record.seq[pos * 1021:(pos * 1021) + 1021])
-            splits.append(create_seqrecord(id=id, name=id, description="", seq=seq))
-        return splits, keys
-
-    keys = {}
-    sequences = []
-    input_seq_iterator = SeqIO.parse(fasta_path, "fasta")
-    for record in input_seq_iterator:
-        if len(record.seq) > 1021:
-            _seqs, _keys = crop_fasta(record)
-            sequences.extend(_seqs)
-            keys.update(_keys)
+def check_embeddings_exist(proteins):
+    """Check if embeddings already exist for all proteins"""
+    missing_embeddings = []
+    existing_embeddings = []
+    
+    for protein in proteins:
+        embedding_path = "{}/esm/{}.pt".format(args.data_path, protein)
+        if os.path.exists(embedding_path):
+            existing_embeddings.append(protein)
         else:
-            sequences.append(record)
-
-    cropped_fasta = "{}/sequence_cropped.fasta".format(args.data_path)
-    SeqIO.write(sequences, cropped_fasta, "fasta")
-
-    generate_bulk_embedding("./preprocessing/extract.py", "{}".format(cropped_fasta),
-                            "{}/esm".format(args.data_path))
-
-    # merge
-    if len(keys) > 0:
-        print("Found {} protein with length > 1021".format(len(keys)))
-        merge_pts(keys, fasta_path)
+            missing_embeddings.append(protein)
+    
+    print(f"Found embeddings for {len(existing_embeddings)} proteins")
+    if missing_embeddings:
+        print(f"Missing embeddings for {len(missing_embeddings)} proteins: {missing_embeddings[:5]}{'...' if len(missing_embeddings) > 5 else ''}")
+    
+    return existing_embeddings, missing_embeddings
 
 
 # Initialize proteins list
 proteins = []
 
 if args.input_type == 'fasta':
-    if not args.fasta_path is None:
-        proteins = set(get_proteins_from_fasta("{}/{}".format(args.data_path, args.fasta_path)))
-        # Get all PDB files (both .pdb and .pdb.gz)
-        pdb_files = os.listdir("{}/{}".format(args.data_path, args.pdb_path))
-        pdbs = set()
-        for pdb_file in pdb_files:
-            if pdb_file.endswith(".pdb.gz"):
-                pdbs.add(pdb_file.replace(".pdb.gz", ""))
-            elif pdb_file.endswith(".pdb"):
-                pdbs.add(pdb_file.replace(".pdb", ""))
-        
-        proteins = list(pdbs.intersection(proteins))
+    if args.fasta_path:
+        fasta_full_path = "{}/{}".format(args.data_path, args.fasta_path)
+        if os.path.exists(fasta_full_path):
+            proteins = set(get_proteins_from_fasta(fasta_full_path))
+            print(f"Found {len(proteins)} proteins in FASTA file")
+            
+            # Get all PDB files (both .pdb and .pdb.gz)
+            pdb_dir = "{}/{}".format(args.data_path, args.pdb_path)
+            if os.path.exists(pdb_dir):
+                pdb_files = os.listdir(pdb_dir)
+                pdbs = set()
+                for pdb_file in pdb_files:
+                    if pdb_file.endswith(".pdb.gz"):
+                        pdbs.add(pdb_file.replace(".pdb.gz", ""))
+                    elif pdb_file.endswith(".pdb"):
+                        pdbs.add(pdb_file.replace(".pdb", ""))
+                
+                print(f"Found {len(pdbs)} PDB files")
+                proteins = list(pdbs.intersection(proteins))
+                print(f"Intersection: {len(proteins)} proteins have both FASTA and PDB")
+            else:
+                print(f"PDB directory not found: {pdb_dir}")
+                exit()
+        else:
+            print(f"FASTA file not found: {fasta_full_path}")
+            exit()
         
 elif args.input_type == 'pdb':
-    if not args.pdb_path is None:
-        pdb_path = "{}/{}".format(args.data_path, args.pdb_path)
-        if os.path.exists(pdb_path):
-            pdb_files = os.listdir(pdb_path)
-            proteins = []
-            for pdb_file in pdb_files:
-                if pdb_file.endswith(".pdb.gz"):
-                    proteins.append(pdb_file.replace(".pdb.gz", ""))
-                elif pdb_file.endswith(".pdb"):
-                    proteins.append(pdb_file.replace(".pdb", ""))
-            
-            if len(proteins) == 0:
-                print("No proteins found in {}.".format(pdb_path))
-                exit()
-            create_fasta(proteins)
-        else:
-            print("PDB directory not found -- {}".format(pdb_path))
+    pdb_path = "{}/{}".format(args.data_path, args.pdb_path)
+    if os.path.exists(pdb_path):
+        pdb_files = os.listdir(pdb_path)
+        proteins = []
+        for pdb_file in pdb_files:
+            if pdb_file.endswith(".pdb.gz"):
+                proteins.append(pdb_file.replace(".pdb.gz", ""))
+            elif pdb_file.endswith(".pdb"):
+                proteins.append(pdb_file.replace(".pdb", ""))
+        
+        if len(proteins) == 0:
+            print("No proteins found in {}.".format(pdb_path))
             exit()
+        create_fasta(proteins)
+    else:
+        print("PDB directory not found -- {}".format(pdb_path))
+        exit()
 
 if len(proteins) > 0:
-    print("Predicting for {} proteins".format(len(proteins)))
+    print("Found {} total proteins".format(len(proteins)))
 else:
     print("No proteins found for prediction.")
     exit()
 
-print("Generating Embeddings from {}".format(args.fasta_path))
-os.makedirs("{}/esm".format(args.data_path), exist_ok=True)
-generate_embeddings(args.fasta_path)
+# Check which proteins have embeddings
+if args.skip_embedding:
+    existing_proteins, missing_proteins = check_embeddings_exist(proteins)
+    
+    if missing_proteins:
+        print(f"WARNING: {len(missing_proteins)} proteins are missing embeddings!")
+        print("You may need to generate embeddings for these proteins first.")
+        
+        # Use only proteins with existing embeddings
+        proteins = existing_proteins
+        print(f"Proceeding with {len(proteins)} proteins that have embeddings")
+    
+    if len(proteins) == 0:
+        print("No proteins with embeddings found. Cannot proceed.")
+        exit()
+else:
+    # Generate embeddings (original code)
+    print("Generating Embeddings from {}".format(args.fasta_path))
+    os.makedirs("{}/esm".format(args.data_path), exist_ok=True)
+    generate_embeddings(args.fasta_path)
 
+print(f"Proceeding with prediction for {len(proteins)} proteins")
+
+# Create dataset kwargs
 kwargs = {
     'seq_id': Constants.Final_thresholds[args.ontology],
     'ont': args.ontology,
@@ -195,52 +186,64 @@ kwargs = {
     'pdb_path': "{}/{}".format(args.data_path, args.pdb_path)
 }
 
+print("Loading dataset...")
 dataset = load_dataset(root=args.data_path, **kwargs)
 
+print("Creating data loader...")
 test_dataloader = DataLoader(dataset,
                              batch_size=args.batch_size,
                              drop_last=False,
                              shuffle=False)
 
 # model
+print("Loading model...")
 model = GCN(**ont_kwargs)
 model.to(device)
 
 optimizer = optim.Adam(model.parameters())
 
 ckp_pth = "{}/{}.pt".format(args.data_path, args.ontology)
-print(ckp_pth)
+print(f"Loading checkpoint from: {ckp_pth}")
+
 # load the saved checkpoint
 if os.path.exists(ckp_pth):
     model, optimizer, current_epoch, min_val_loss = load_ckp(ckp_pth, model, optimizer, device)
+    print(f"Loaded model from epoch {current_epoch}")
 else:
     print("Model not found. Skipping...")
     exit()
 
+print("Running predictions...")
 model.eval()
 
 scores = []
-proteins = []
+protein_results = []
 
-for data in test_dataloader:
+for batch_idx, data in enumerate(test_dataloader):
+    print(f"Processing batch {batch_idx + 1}/{len(test_dataloader)}")
     with torch.no_grad():
-        proteins.extend(data['atoms'].protein)
+        protein_results.extend(data['atoms'].protein)
         scores.extend(model(data.to(device)).tolist())
 
-assert len(proteins) == len(scores)
+assert len(protein_results) == len(scores)
+print(f"Generated predictions for {len(protein_results)} proteins")
 
+print("Loading GO terms and ontology graph...")
 goterms = pickle_load('{}/go_terms'.format(args.data_path))[f'GO-terms-{args.ontology}']
 go_graph = obonet.read_obo(open("{}/go-basic.obo".format(args.data_path), 'r'))
 go_set = nx.ancestors(go_graph, FUNC_DICT[args.ontology])
 
+print("Processing predictions and applying hierarchical constraints...")
 results = {}
-for protein, score in zip(proteins, scores):
+for protein, score in zip(protein_results, scores):
     protein_scores = {}
 
+    # Apply cutoff threshold
     for go_term, _score in zip(goterms, score):
         if _score > args.cut_off:
             protein_scores[go_term] = max(protein_scores.get(go_term, 0), _score)
 
+    # Apply hierarchical constraints (propagate scores to descendants)
     for go_term, max_score in list(protein_scores.items()):
         descendants = nx.descendants(go_graph, go_term).intersection(go_set)
         for descendant in descendants:
@@ -249,4 +252,15 @@ for protein, score in zip(proteins, scores):
     results[protein] = protein_scores
 
 print("Writing output to {}".format(args.output))
-write_to_file(results, "{}/{}".format(args.data_path, args.output))
+output_path = "{}/{}".format(args.data_path, args.output)
+write_to_file(results, output_path)
+
+print(f"Prediction complete!")
+print(f"Results saved to: {output_path}")
+print(f"Predicted functions for {len(results)} proteins")
+
+# Print summary statistics
+total_predictions = sum(len(protein_scores) for protein_scores in results.values())
+avg_predictions_per_protein = total_predictions / len(results) if results else 0
+print(f"Total GO term predictions: {total_predictions}")
+print(f"Average predictions per protein: {avg_predictions_per_protein:.2f}")
