@@ -55,8 +55,8 @@ def create_fasta(proteins):
     fasta = []
     for protein in proteins:
         # Try both .pdb.gz and .pdb extensions
-        pdb_path_gz = "{}/{}/{}.pdb.gz".format(args.data_path, args.pdb_path, protein)
-        pdb_path = "{}/{}/{}.pdb".format(args.data_path, args.pdb_path, protein)
+        pdb_path_gz = os.path.join(args.data_path, args.pdb_path, f"{protein}.pdb.gz")
+        pdb_path = os.path.join(args.data_path, args.pdb_path, f"{protein}.pdb")
         
         if os.path.exists(pdb_path_gz):
             alpha_fold_seq = get_sequence_from_pdb(pdb_path_gz, "A")
@@ -68,8 +68,8 @@ def create_fasta(proteins):
             
         fasta.append(create_seqrecord(id=protein, seq=alpha_fold_seq))
     
-    SeqIO.write(fasta, "{}/sequence.fasta".format(args.data_path), "fasta")
-    args.fasta_path = "{}/sequence.fasta".format(args.data_path)
+    SeqIO.write(fasta, os.path.join(args.data_path, "sequence.fasta"), "fasta")
+    args.fasta_path = os.path.join(args.data_path, "sequence.fasta")
 
 
 def write_to_file(data, output):
@@ -85,7 +85,7 @@ def check_embeddings_exist(proteins):
     existing_embeddings = []
     
     for protein in proteins:
-        embedding_path = "{}/esm/{}.pt".format(args.data_path, protein)
+        embedding_path = os.path.join(args.data_path, "esm", f"{protein}.pt")
         if os.path.exists(embedding_path):
             existing_embeddings.append(protein)
         else:
@@ -98,41 +98,54 @@ def check_embeddings_exist(proteins):
     return existing_embeddings, missing_embeddings
 
 
+def check_pdb_files_exist(proteins):
+    """Check which proteins have PDB files and return only those that exist"""
+    existing_pdbs = []
+    missing_pdbs = []
+    
+    pdb_dir = os.path.join(args.data_path, args.pdb_path)
+    
+    for protein in proteins:
+        pdb_path_gz = os.path.join(pdb_dir, f"{protein}.pdb.gz")
+        pdb_path = os.path.join(pdb_dir, f"{protein}.pdb")
+        
+        if os.path.exists(pdb_path_gz) or os.path.exists(pdb_path):
+            existing_pdbs.append(protein)
+        else:
+            missing_pdbs.append(protein)
+    
+    print(f"Found PDB files for {len(existing_pdbs)} proteins")
+    if missing_pdbs:
+        print(f"Missing PDB files for {len(missing_pdbs)} proteins: {missing_pdbs[:5]}{'...' if len(missing_pdbs) > 5 else ''}")
+    
+    return existing_pdbs, missing_pdbs
+
+
 # Initialize proteins list
 proteins = []
 
 if args.input_type == 'fasta':
     if args.fasta_path:
-        fasta_full_path = "{}/{}".format(args.data_path, args.fasta_path)
+        fasta_full_path = os.path.join(args.data_path, args.fasta_path)
         if os.path.exists(fasta_full_path):
             proteins = set(get_proteins_from_fasta(fasta_full_path))
             print(f"Found {len(proteins)} proteins in FASTA file")
             
-            # Get all PDB files (both .pdb and .pdb.gz)
-            pdb_dir = "{}/{}".format(args.data_path, args.pdb_path)
-            if os.path.exists(pdb_dir):
-                pdb_files = os.listdir(pdb_dir)
-                pdbs = set()
-                for pdb_file in pdb_files:
-                    if pdb_file.endswith(".pdb.gz"):
-                        pdbs.add(pdb_file.replace(".pdb.gz", ""))
-                    elif pdb_file.endswith(".pdb"):
-                        pdbs.add(pdb_file.replace(".pdb", ""))
-                
-                print(f"Found {len(pdbs)} PDB files")
-                proteins = list(pdbs.intersection(proteins))
-                print(f"Intersection: {len(proteins)} proteins have both FASTA and PDB")
-            else:
-                print(f"PDB directory not found: {pdb_dir}")
+            # Check which proteins have PDB files
+            existing_pdbs, missing_pdbs = check_pdb_files_exist(proteins)
+            proteins = existing_pdbs
+            
+            if len(proteins) == 0:
+                print("No proteins with PDB files found!")
                 exit()
         else:
             print(f"FASTA file not found: {fasta_full_path}")
             exit()
         
 elif args.input_type == 'pdb':
-    pdb_path = "{}/{}".format(args.data_path, args.pdb_path)
-    if os.path.exists(pdb_path):
-        pdb_files = os.listdir(pdb_path)
+    pdb_dir = os.path.join(args.data_path, args.pdb_path)
+    if os.path.exists(pdb_dir):
+        pdb_files = os.listdir(pdb_dir)
         proteins = []
         for pdb_file in pdb_files:
             if pdb_file.endswith(".pdb.gz"):
@@ -141,15 +154,15 @@ elif args.input_type == 'pdb':
                 proteins.append(pdb_file.replace(".pdb", ""))
         
         if len(proteins) == 0:
-            print("No proteins found in {}.".format(pdb_path))
+            print("No proteins found in {}.".format(pdb_dir))
             exit()
         create_fasta(proteins)
     else:
-        print("PDB directory not found -- {}".format(pdb_path))
+        print("PDB directory not found -- {}".format(pdb_dir))
         exit()
 
 if len(proteins) > 0:
-    print("Found {} total proteins".format(len(proteins)))
+    print("Found {} total proteins with PDB files".format(len(proteins)))
 else:
     print("No proteins found for prediction.")
     exit()
@@ -169,25 +182,47 @@ if args.skip_embedding:
     if len(proteins) == 0:
         print("No proteins with embeddings found. Cannot proceed.")
         exit()
-else:
-    # Generate embeddings (original code)
-    print("Generating Embeddings from {}".format(args.fasta_path))
-    os.makedirs("{}/esm".format(args.data_path), exist_ok=True)
-    generate_embeddings(args.fasta_path)
 
-print(f"Proceeding with prediction for {len(proteins)} proteins")
+print(f"Final protein list: {len(proteins)} proteins")
 
-# Create dataset kwargs
+# Ensure PDB path has proper format for dataset loading
+# Fix the path concatenation bug by ensuring proper path joining
+pdb_path_for_dataset = os.path.join(args.data_path, args.pdb_path)
+
+# Create dataset kwargs with proper path handling
 kwargs = {
     'seq_id': Constants.Final_thresholds[args.ontology],
     'ont': args.ontology,
     'session': 'selected',
     'prot_ids': proteins,
-    'pdb_path': "{}/{}".format(args.data_path, args.pdb_path)
+    'pdb_path': pdb_path_for_dataset
 }
 
+print(f"Dataset kwargs:")
+print(f"  - seq_id: {kwargs['seq_id']}")
+print(f"  - ontology: {kwargs['ont']}")
+print(f"  - session: {kwargs['session']}")
+print(f"  - proteins: {len(kwargs['prot_ids'])}")
+print(f"  - pdb_path: {kwargs['pdb_path']}")
+
 print("Loading dataset...")
-dataset = load_dataset(root=args.data_path, **kwargs)
+try:
+    dataset = load_dataset(root=args.data_path, **kwargs)
+    print(f"Successfully loaded dataset with {len(dataset)} samples")
+except Exception as e:
+    print(f"Error loading dataset: {e}")
+    print("Debugging information:")
+    print(f"  - Data path: {args.data_path}")
+    print(f"  - PDB path: {pdb_path_for_dataset}")
+    print(f"  - First 5 proteins: {proteins[:5]}")
+    
+    # Check if PDB files exist for first few proteins
+    for protein in proteins[:3]:
+        pdb_gz = os.path.join(pdb_path_for_dataset, f"{protein}.pdb.gz")
+        pdb_regular = os.path.join(pdb_path_for_dataset, f"{protein}.pdb")
+        print(f"  - {protein}: .pdb.gz exists: {os.path.exists(pdb_gz)}, .pdb exists: {os.path.exists(pdb_regular)}")
+    
+    raise e
 
 print("Creating data loader...")
 test_dataloader = DataLoader(dataset,
@@ -202,7 +237,7 @@ model.to(device)
 
 optimizer = optim.Adam(model.parameters())
 
-ckp_pth = "{}/{}.pt".format(args.data_path, args.ontology)
+ckp_pth = os.path.join(args.data_path, f"{args.ontology}.pt")
 print(f"Loading checkpoint from: {ckp_pth}")
 
 # load the saved checkpoint
@@ -229,8 +264,8 @@ assert len(protein_results) == len(scores)
 print(f"Generated predictions for {len(protein_results)} proteins")
 
 print("Loading GO terms and ontology graph...")
-goterms = pickle_load('{}/go_terms'.format(args.data_path))[f'GO-terms-{args.ontology}']
-go_graph = obonet.read_obo(open("{}/go-basic.obo".format(args.data_path), 'r'))
+goterms = pickle_load(os.path.join(args.data_path, 'go_terms'))[f'GO-terms-{args.ontology}']
+go_graph = obonet.read_obo(open(os.path.join(args.data_path, "go-basic.obo"), 'r'))
 go_set = nx.ancestors(go_graph, FUNC_DICT[args.ontology])
 
 print("Processing predictions and applying hierarchical constraints...")
@@ -252,7 +287,7 @@ for protein, score in zip(protein_results, scores):
     results[protein] = protein_scores
 
 print("Writing output to {}".format(args.output))
-output_path = "{}/{}".format(args.data_path, args.output)
+output_path = os.path.join(args.data_path, args.output)
 write_to_file(results, output_path)
 
 print(f"Prediction complete!")
