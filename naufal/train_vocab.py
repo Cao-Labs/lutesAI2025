@@ -161,7 +161,7 @@ def train():
 # Save GO vocab to disk
 import json
 with open("go_vocab.json", "w") as f:
-    json.dump(dataset.go_vocab, f)
+    json.dump(Dataset.go_vocab, f)
 print("[✓] Saved GO vocabulary to go_vocab.json")
 
 
