@@ -122,14 +122,21 @@ class GOEnv(gym.Env):
         }
 
     def step(self, action):
+        # amount of go terms
         selected_indices = np.nonzero(action)[0]
         selected_terms = [self.current_go_choices[i] for i in selected_indices]
         correct = set(selected_terms) & set(self.current_truth)
+        amount_correct = len(correct)
         incorrect = set(selected_terms) - correct
         incorrectScore = len(incorrect) *.25
-        reward = len(correct) - incorrectScore
-        # Calculate percentage of correct GO terms guessed
         total_true = len(set(self.current_truth))
+
+        precision = amount_correct/len(selected_terms) if len(selected_terms) > 0 else 0
+        recall = amount_correct/len(self.current_truth) if len(self.current_truth) > 0 else 0
+        f1 = 2 * (precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+
+        reward = f1
+        # Calculate percentage of correct GO terms guessed
         percent_correct = (len(correct) / total_true) * 100 if total_true > 0 else 0.0
 
         # Optional: log info
