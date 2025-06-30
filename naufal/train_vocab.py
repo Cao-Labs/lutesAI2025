@@ -3,7 +3,7 @@ import json
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
-from transformers import BigBirdModel
+from transformers import BigBirdModel, BigBirdConfig
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from collections import defaultdict
@@ -80,15 +80,23 @@ class ProteinFunctionDataset(Dataset):
 
         return embedding, attention_mask, target
 
-# === BigBird Model with Pretrained Weights ===
+# === BigBird Model ===
 class BigBirdProteinModel(nn.Module):
     def __init__(self, input_dim, target_dim, max_len):
         super().__init__()
         self.project = nn.Linear(input_dim, 768)
-        self.bigbird = BigBirdModel.from_pretrained(
-            "google/bigbird-roberta-base",
-            attention_type="block_sparse"
+        config = BigBirdConfig(
+            vocab_size=26879,  # Your tokenizer vocab size
+            hidden_size=768,
+            num_attention_heads=12,
+            num_hidden_layers=12,
+            attention_type="block_sparse",
+            block_size=64,
+            max_position_embeddings=max_len,
+            use_bias=True,
+            is_decoder=False,
         )
+        self.bigbird = BigBirdModel(config)
         self.classifier = nn.Sequential(
             nn.Linear(768, 512),
             nn.ReLU(),
@@ -153,6 +161,7 @@ def train():
     torch.save(model.state_dict(), model_output_path)
     print(f"[✓] Model saved to {model_output_path}")
 
+    # === Save GO vocabulary as JSON ===
     with open(vocab_output_path, "w") as f:
         json.dump(dataset.go_vocab, f)
     print(f"[✓] Saved GO vocabulary to {vocab_output_path}")
@@ -160,5 +169,3 @@ def train():
 # === Entry Point ===
 if __name__ == "__main__":
     train()
-
-
