@@ -3,7 +3,7 @@ import math
 from collections import defaultdict
 
 # === File paths ===
-pred_file = "/data/summer2020/naufal/test_pred2.txt"
+pred_file = "/data/summer2020/naufal/test_pred.txt"
 true_file = "/data/summer2020/naufal/matched_ids_with_go.txt"
 
 # === Load true annotations ===
