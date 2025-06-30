@@ -1,4 +1,5 @@
 import os
+import json
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
@@ -85,7 +86,7 @@ class BigBirdProteinModel(nn.Module):
         super().__init__()
         self.project = nn.Linear(input_dim, 768)
         config = BigBirdConfig(
-            vocab_size=26879,  # FIXED to match your tokenizer vocab
+            vocab_size=26879,  # Your tokenizer vocab size
             hidden_size=768,
             num_attention_heads=12,
             num_hidden_layers=12,
@@ -116,10 +117,12 @@ def train():
     learning_rate = 1e-5
     min_lr = 1e-7
 
-    # Paths
+    # === Paths ===
     obo_path = "/data/shared/databases/UniProt2025/GO_June_1_2025.obo"
     embedding_dir = "/data/summer2020/naufal/final_embeddings_pca"
     go_mapping_file = "/data/summer2020/naufal/matched_ids_with_go.txt"
+    vocab_output_path = "/data/shared/github/lutesAI2025/naufal/go_vocab.json"
+    model_output_path = "/data/shared/github/lutesAI2025/naufal/bigbird_finetuned.pt"
 
     print("[INFO] Parsing GO DAG...")
     go_graph = extract_go_graph(obo_path)
@@ -155,15 +158,13 @@ def train():
         print(f"[INFO] Epoch {epoch+1} Avg Loss: {avg_loss:.4f}")
         scheduler.step(avg_loss)
 
-    torch.save(model.state_dict(), "bigbird_finetuned.pt")
-    print("[✓] Model saved as bigbird_finetuned.pt")
+    torch.save(model.state_dict(), model_output_path)
+    print(f"[✓] Model saved to {model_output_path}")
 
-# Save GO vocab to disk
-import json
-with open("go_vocab.json", "w") as f:
-    json.dump(Dataset.go_vocab, f)
-print("[✓] Saved GO vocabulary to go_vocab.json")
-
+    # === Save GO vocabulary as JSON ===
+    with open(vocab_output_path, "w") as f:
+        json.dump(dataset.go_vocab, f)
+    print(f"[✓] Saved GO vocabulary to {vocab_output_path}")
 
 # === Entry Point ===
 if __name__ == "__main__":
