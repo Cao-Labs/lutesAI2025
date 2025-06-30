@@ -18,7 +18,7 @@ BATCH_SIZE = 8
 THRESHOLD = 0.69
 EMBEDDING_DIM = 512
 MAX_POS = 512
-VOCAB_SIZE = 26879  # ✅ Your correct vocab size for ProteinExt 2.0
+VOCAB_SIZE = 50265  # ✅ Your correct vocab size for ProteinExt 2.0
 
 # === Load GO vocab and labels ===
 print("Loading GO vocab...")
