@@ -18,7 +18,6 @@ BATCH_SIZE = 8
 THRESHOLD = 0.69
 EMBEDDING_DIM = 512
 MAX_POS = 512
-VOCAB_SIZE = 50265
 
 # === Load GO vocab and labels ===
 print("Loading GO vocab...")
@@ -26,6 +25,7 @@ with open(GO_VOCAB_PATH) as f:
     go_vocab = json.load(f)
 
 go_classes = sorted(go_vocab.keys())
+vocab_size = len(go_vocab)
 mlb = MultiLabelBinarizer(classes=go_classes)
 
 print("Loading ground truth labels...")
@@ -41,7 +41,9 @@ with open(ACTUAL_LABEL_PATH, "r") as f:
 
 # === Gather matching .pt embeddings and labels ===
 embeddings, label_list, ids = [], [], []
-for fname in os.listdir(EMBEDDING_DIR):
+print("Loading embeddings and matching labels...")
+count = 0
+for fname in sorted(os.listdir(EMBEDDING_DIR)):
     if fname.endswith(".pt"):
         pid = fname[:-3]
         if pid in labels_dict:
@@ -49,6 +51,11 @@ for fname in os.listdir(EMBEDDING_DIR):
             embeddings.append(emb)
             label_list.append(labels_dict[pid])
             ids.append(pid)
+            count += 1
+            if count % 500 == 0:
+                print(f" → Loaded {count} protein embeddings...")
+
+print(f"✅ Total proteins loaded: {count}")
 
 # === Convert to tensors ===
 print("Encoding labels...")
@@ -60,11 +67,11 @@ dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False)
 
 # === Match model to checkpoint ===
 class BigBirdProteinModel(nn.Module):
-    def __init__(self, input_dim, target_dim, max_len):
+    def __init__(self, input_dim, target_dim, max_len, vocab_size):
         super().__init__()
         self.project = nn.Linear(input_dim, 768)
         config = BigBirdConfig(
-            vocab_size=VOCAB_SIZE,
+            vocab_size=vocab_size,
             hidden_size=768,
             num_attention_heads=12,
             num_hidden_layers=12,
@@ -91,13 +98,14 @@ class BigBirdProteinModel(nn.Module):
 # === Load model ===
 device = torch.device("cuda:1" if torch.cuda.device_count() > 1 else "cuda:0")
 num_classes = len(mlb.classes_)
-model = BigBirdProteinModel(input_dim=EMBEDDING_DIM, target_dim=num_classes, max_len=MAX_POS).to(device)
+model = BigBirdProteinModel(input_dim=EMBEDDING_DIM, target_dim=num_classes, max_len=MAX_POS, vocab_size=vocab_size).to(device)
 model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
 model.eval()
 
 # === Run inference ===
 print("Running inference...")
 all_preds, all_true = [], []
+processed = 0
 with torch.no_grad():
     for x_batch, y_batch in dataloader:
         attn_mask = (x_batch.sum(dim=2) != 0).long()
@@ -106,6 +114,12 @@ with torch.no_grad():
         probs = torch.sigmoid(logits)
         all_preds.append(probs.cpu())
         all_true.append(y_batch.cpu())
+
+        processed += x_batch.size(0)
+        if processed % 500 == 0:
+            print(f" → Inference complete for {processed} proteins...")
+
+print("✅ Inference complete.")
 
 all_preds = torch.cat(all_preds)
 all_true = torch.cat(all_true)
@@ -125,6 +139,8 @@ for i, pid in enumerate(ids):
         if pred_binary[i, j] == 1:
             acc = round(accuracy_per_label[j].item(), 2)
             pred_lines.append(f"{pid}\t{go_term}\t{acc}")
+    if (i + 1) % 500 == 0:
+        print(f" → Predictions written for {i+1} proteins...")
 
 with open(PRED_OUTPUT, "w") as f:
     f.write("\n".join(pred_lines))
@@ -141,8 +157,11 @@ for i, pid in enumerate(ids):
     for j, go_term in enumerate(mlb.classes_):
         if all_true[i, j] == 1:
             actual_lines.append(f"{pid}\t{go_term}")
+    if (i + 1) % 500 == 0:
+        print(f" → Ground truth written for {i+1} proteins...")
 
-with open(ACTUAL_LABEL_PATH.replace(".txt", "_actual_cafa.txt"), "w") as f:
+gt_path = ACTUAL_LABEL_PATH.replace(".txt", "_actual_cafa.txt")
+with open(gt_path, "w") as f:
     f.write("\n".join(actual_lines))
 
 print("✅ Evaluation complete.")
