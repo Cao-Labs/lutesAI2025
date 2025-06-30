@@ -1,6 +1,7 @@
 import sys
 import os
 import csv
+import re
 from GeneOntologyTree import GeneOntologyTree
 
 class TrueProteinFunction:
@@ -29,7 +30,7 @@ class TrueProteinFunction:
         return self.AllTrueGO
 
 class PredictedProteinFunction:
-    """A class to load prediction data from CSV or tab-separated files."""
+    """A class to load prediction data from various formats (CSV, TSV, TXT, space-separated)."""
     def __init__(self, predictions_file):
         self.AllPredictedGO = {}
         self._loadFile(predictions_file)
@@ -37,48 +38,81 @@ class PredictedProteinFunction:
     def _loadFile(self, predictions_file):
         print(f"Loading predictions from: {predictions_file}")
         try:
-            # Detect file format and load accordingly
+            # Try different loading methods in order of preference
             if predictions_file.lower().endswith('.csv'):
                 self._loadCSV(predictions_file)
             else:
-                self._loadTSV(predictions_file)
+                # For .txt, .tsv, or any other format, try flexible parsing
+                self._loadFlexible(predictions_file)
         except FileNotFoundError:
             print(f"FATAL ERROR: Predictions file not found at {predictions_file}")
             sys.exit(1)
         print(f"Loaded predictions for {len(self.AllPredictedGO)} proteins.")
 
-    def _loadCSV(self, predictions_file):
-        """Load predictions from CSV file."""
-        with open(predictions_file, 'r') as f:
-            # Try to detect delimiter
-            sample = f.read(1024)
-            f.seek(0)
-            sniffer = csv.Sniffer()
-            delimiter = sniffer.sniff(sample).delimiter
-            
-            reader = csv.reader(f, delimiter=delimiter)
-            
-            # Skip header if it exists
-            first_row = next(reader)
-            if not self._is_data_row(first_row):
-                pass  # Header was skipped
-            else:
-                # First row is data, process it
-                self._process_prediction_row(first_row)
-            
-            # Process remaining rows
-            for row in reader:
-                self._process_prediction_row(row)
+    def _detect_delimiter(self, sample_lines):
+        """Detect the most likely delimiter from sample lines."""
+        delimiters = ['\t', ' ', ',', ';', '|']
+        delimiter_counts = {}
+        
+        for delimiter in delimiters:
+            count = 0
+            for line in sample_lines:
+                if line.strip():
+                    parts = line.strip().split(delimiter)
+                    if len(parts) >= 3:  # We need at least 3 columns
+                        try:
+                            # Check if the third column can be converted to float
+                            float(parts[2])
+                            count += 1
+                        except (ValueError, IndexError):
+                            pass
+            delimiter_counts[delimiter] = count
+        
+        # Return the delimiter with the highest success count
+        best_delimiter = max(delimiter_counts, key=delimiter_counts.get)
+        print(f"Auto-detected delimiter: '{best_delimiter}' (found {delimiter_counts[best_delimiter]} valid lines)")
+        return best_delimiter
 
-    def _loadTSV(self, predictions_file):
-        """Load predictions from tab-separated file (original format)."""
+    def _loadFlexible(self, predictions_file):
+        """Load predictions with automatic delimiter detection."""
         with open(predictions_file, 'r') as f:
+            # Read first few lines to detect delimiter
+            sample_lines = []
+            file_position = f.tell()
+            for _ in range(10):  # Sample first 10 lines
+                line = f.readline()
+                if not line:
+                    break
+                # Skip common header patterns
+                if not line.startswith(("AUTHOR", "MODEL", "KEYWORDS", "END")):
+                    sample_lines.append(line)
+            
+            # Reset file position
+            f.seek(file_position)
+            
+            if not sample_lines:
+                print("WARNING: No valid sample lines found for delimiter detection")
+                return
+            
+            # Detect delimiter
+            delimiter = self._detect_delimiter(sample_lines)
+            
+            # Process the entire file
+            f.seek(0)
             for line in f:
                 if line.startswith(("AUTHOR", "MODEL", "KEYWORDS", "END")): 
                     continue
-                parts = line.strip().split('\t')
+                
+                # Handle different delimiters
+                if delimiter == ' ':
+                    # For space-separated, split on whitespace and handle multiple spaces
+                    parts = line.strip().split()
+                else:
+                    parts = line.strip().split(delimiter)
+                
                 if len(parts) < 3: 
                     continue
+                
                 try:
                     protein_id, go_term, score = parts[0], parts[1], float(parts[2])
                     if protein_id not in self.AllPredictedGO:
@@ -86,6 +120,39 @@ class PredictedProteinFunction:
                     self.AllPredictedGO[protein_id].append((go_term, score))
                 except (ValueError, IndexError):
                     continue
+
+    def _loadCSV(self, predictions_file):
+        """Load predictions from CSV file with automatic delimiter detection."""
+        with open(predictions_file, 'r') as f:
+            # Try to detect delimiter
+            sample = f.read(1024)
+            f.seek(0)
+            
+            try:
+                sniffer = csv.Sniffer()
+                delimiter = sniffer.sniff(sample).delimiter
+                print(f"CSV delimiter detected: '{delimiter}'")
+            except:
+                # Fallback to comma if detection fails
+                delimiter = ','
+                print("CSV delimiter detection failed, using comma as default")
+            
+            reader = csv.reader(f, delimiter=delimiter)
+            
+            # Skip header if it exists
+            try:
+                first_row = next(reader)
+                if not self._is_data_row(first_row):
+                    pass  # Header was skipped
+                else:
+                    # First row is data, process it
+                    self._process_prediction_row(first_row)
+            except StopIteration:
+                return
+            
+            # Process remaining rows
+            for row in reader:
+                self._process_prediction_row(row)
 
     def _is_data_row(self, row):
         """Check if a row contains data (not a header)."""
@@ -116,7 +183,7 @@ def evaluate_predictions(obo_file, ground_truth_file, predictions_file, output_d
     Args:
         obo_file: Path to Gene Ontology OBO file
         ground_truth_file: Path to ground truth file (TSV format)
-        predictions_file: Path to predictions file (CSV or TSV)
+        predictions_file: Path to predictions file (supports CSV, TSV, TXT, space-separated)
         output_dir: Directory to save results
     """
     
@@ -209,8 +276,8 @@ def main():
     # Default file paths - modify these for your setup
     OBO_FILE_PATH = "/data/shared/databases/UniProt2025/GO_June_1_2025.obo"
     GROUND_TRUTH_FILE = "/data/summer2020/Boen/ground_truth_go_terms/consolidated_ground_truth.tsv"
-    PREDICTIONS_FILE = "/data/summer2020/Boen/deepgozero_pipeline_output/deepgozero_predictions_bp.csv"  # Changed to .csv
-    OUTPUT_DIR = "/data/summer2020/Boen/deepgozero_pipeline_output"
+    PREDICTIONS_FILE = "/data/summer2020/Boen/transfun_predictions/transfun_predictions_bp.txt"  # Updated for TransFun
+    OUTPUT_DIR = "/data/summer2020/Boen/transfun_evaluation_output"
     
     # Check if command line arguments are provided
     if len(sys.argv) >= 4:
