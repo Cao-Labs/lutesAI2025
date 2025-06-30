@@ -1,19 +1,22 @@
 import sys
 import os
+from collections import defaultdict
 
 def load_ground_truth(ground_truth_file):
     """
     Loads the ground truth file into a dictionary for fast lookups.
+    Now handles multiple GO terms per protein.
 
     Args:
         ground_truth_file (str): Path to the matched_ids_with_go.txt file.
 
     Returns:
-        dict: A dictionary mapping protein IDs to their GO terms.
-              Example: {'001R_FRG3G': 'GO:0046782', ...}
+        dict: A dictionary mapping protein IDs to their GO terms (as sets).
+              Example: {'001R_FRG3G': {'GO:0046782', 'GO:0008150'}, ...}
     """
     print(f"Loading ground truth data from: {ground_truth_file}")
-    ground_truth_map = {}
+    ground_truth_map = defaultdict(set)
+    
     try:
         with open(ground_truth_file, 'r') as f:
             for line in f:
@@ -21,23 +24,32 @@ def load_ground_truth(ground_truth_file):
                 parts = line.strip().split()
                 if len(parts) >= 2:
                     protein_id = parts[0]
-                    go_terms = parts[1]
-                    ground_truth_map[protein_id] = go_terms
+                    go_term = parts[1]
+                    # Add GO term to the set for this protein
+                    ground_truth_map[protein_id].add(go_term)
     except FileNotFoundError:
         print(f"Error: Ground truth file not found at {ground_truth_file}")
         sys.exit(1)
     
-    print(f"Loaded {len(ground_truth_map)} ground truth entries.")
+    print(f"Loaded {len(ground_truth_map)} unique proteins.")
+    
+    # Print some statistics
+    total_go_terms = sum(len(terms) for terms in ground_truth_map.values())
+    avg_terms_per_protein = total_go_terms / len(ground_truth_map) if ground_truth_map else 0
+    print(f"Total GO term annotations: {total_go_terms}")
+    print(f"Average GO terms per protein: {avg_terms_per_protein:.2f}")
+    
     return ground_truth_map
 
 def extract_go_terms_from_directory(input_dir, ground_truth_map, output_file):
     """
     Reads all FASTA files from a directory, uses the filename as the protein ID,
     looks up GO terms, and saves the results to a single output file.
+    Now properly handles multiple GO terms per protein.
 
     Args:
         input_dir (str): Path to the directory containing FASTA files.
-        ground_truth_map (dict): The dictionary of protein IDs and their GO terms.
+        ground_truth_map (dict): The dictionary of protein IDs and their GO terms (sets).
         output_file (str): Path to the file where results will be saved.
     """
     print(f"Processing FASTA files from directory: {input_dir}")
@@ -60,8 +72,10 @@ def extract_go_terms_from_directory(input_dir, ground_truth_map, output_file):
                 
                 # Look up the ID in our ground truth dictionary
                 if protein_id in ground_truth_map:
-                    go_terms = ground_truth_map[protein_id]
-                    fout.write(f"{protein_id}\t{go_terms}\n")
+                    go_terms_set = ground_truth_map[protein_id]
+                    # Join multiple GO terms with semicolons
+                    go_terms_str = ';'.join(sorted(go_terms_set))
+                    fout.write(f"{protein_id}\t{go_terms_str}\n")
                     found_count += 1
                 else:
                     # Handle cases where the protein ID is not in the ground truth file
