@@ -17,7 +17,6 @@ def load_esm3_model():
 def generate_embedding(model, sequence):
     protein = ESMProtein(sequence=sequence)
     sequence_tensor = model.encode(protein)
-
     with torch.no_grad():
         result = model.forward_and_sample(
             sequence_tensor,
@@ -36,12 +35,11 @@ def to_2d_matrix(embedding):
     return matrix
 
 def normalize_matrix(matrix):
-    """
-    Normalize using robust statistics: clip extremes at 1st and 99th percentile then scale to [0,1].
-    """
-    lower, upper = np.percentile(matrix, [1, 99])
-    matrix_clipped = np.clip(matrix, lower, upper)
-    norm_matrix = (matrix_clipped - lower) / (upper - lower + 1e-8)
+    mean = matrix.mean()
+    std = matrix.std() + 1e-8
+    norm_matrix = (matrix - mean) / std
+    norm_matrix = np.clip(norm_matrix, -3, 3)
+    norm_matrix = (norm_matrix + 3) / 6
     return norm_matrix
 
 def save_image(matrix, output_path):
