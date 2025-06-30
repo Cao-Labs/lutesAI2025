@@ -9,7 +9,7 @@ from tqdm import tqdm
 EMBEDDING_DIR = "/data/summer2020/naufal/testing_pca"
 GO_VOCAB_PATH = "/data/shared/github/lutesAI2025/naufal/go_vocab.json"
 MODEL_PATH = "/data/shared/github/lutesAI2025/naufal/bigbird_finetuned.pt"
-OUTPUT_PATH = "/data/summer2020/naufal/test_pred2.txt"
+OUTPUT_PATH = "/data/summer2020/naufal/test_pred.txt"
 
 # === Model Definition ===
 class BigBirdProteinModel(nn.Module):
@@ -54,6 +54,8 @@ model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
 model.eval()
 
 # === Run predictions and save ===
+sigmoid = nn.Sigmoid()
+
 with open(OUTPUT_PATH, "w") as out_f:
     for fname in tqdm(sorted(os.listdir(EMBEDDING_DIR))):
         if not fname.endswith(".pt"):
@@ -68,8 +70,18 @@ with open(OUTPUT_PATH, "w") as out_f:
 
         with torch.no_grad():
             logits = model(x, attn_mask)  # [1, num_labels]
-            topk = 3
-            top_indices = torch.topk(logits, k=topk).indices.squeeze(0).tolist()
-            predicted_terms = [idx_to_go[idx] for idx in top_indices]
+            probs = sigmoid(logits).squeeze(0)  # [num_labels]
+
+            # === Predict with threshold ===
+            threshold = 0.5
+            above_thresh = (probs >= threshold).nonzero(as_tuple=True)[0].tolist()
+
+            if above_thresh:
+                predicted_terms = [idx_to_go[idx] for idx in above_thresh]
+            else:
+                # Fallback: top 3 if none above threshold
+                topk = 3
+                top_indices = torch.topk(probs, k=topk).indices.tolist()
+                predicted_terms = [idx_to_go[idx] for idx in top_indices]
 
         out_f.write(f"{pid}\t{';'.join(predicted_terms)}\n")
