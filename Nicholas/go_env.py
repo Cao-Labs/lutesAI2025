@@ -133,9 +133,8 @@ class GOEnv(gym.Env):
 
         precision = amount_correct/len(selected_terms) if len(selected_terms) > 0 else 0
         recall = amount_correct/len(self.current_truth) if len(self.current_truth) > 0 else 0
-        f1 = 2 * (precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
-
-        reward = f1
+        f1_score = 2 * (precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+        reward = f1_score
         # Calculate percentage of correct GO terms guessed
         percent_correct = (len(correct) / total_true) * 100 if total_true > 0 else 0.0
 
