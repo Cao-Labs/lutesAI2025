@@ -18,6 +18,7 @@ BATCH_SIZE = 8
 THRESHOLD = 0.69
 EMBEDDING_DIM = 512
 MAX_POS = 512
+VOCAB_SIZE = 26879  # ✅ Your correct vocab size for ProteinExt 2.0
 
 # === Load GO vocab and labels ===
 print("Loading GO vocab...")
@@ -25,8 +26,8 @@ with open(GO_VOCAB_PATH) as f:
     go_vocab = json.load(f)
 
 go_classes = sorted(go_vocab.keys())
-vocab_size = len(go_vocab)
 mlb = MultiLabelBinarizer(classes=go_classes)
+num_classes = len(go_classes)
 
 print("Loading ground truth labels...")
 labels_dict = {}
@@ -40,8 +41,8 @@ with open(ACTUAL_LABEL_PATH, "r") as f:
         labels_dict[pid] = go_terms
 
 # === Gather matching .pt embeddings and labels ===
-embeddings, label_list, ids = [], [], []
 print("Loading embeddings and matching labels...")
+embeddings, label_list, ids = [], [], []
 count = 0
 for fname in sorted(os.listdir(EMBEDDING_DIR)):
     if fname.endswith(".pt"):
@@ -61,11 +62,10 @@ print(f"✅ Total proteins loaded: {count}")
 print("Encoding labels...")
 label_tensor = torch.tensor(mlb.fit_transform(label_list), dtype=torch.float32)
 embedding_tensor = torch.stack(embeddings).float()
-
 dataset = TensorDataset(embedding_tensor, label_tensor)
 dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False)
 
-# === Match model to checkpoint ===
+# === Define model matching checkpoint ===
 class BigBirdProteinModel(nn.Module):
     def __init__(self, input_dim, target_dim, max_len, vocab_size):
         super().__init__()
@@ -97,8 +97,14 @@ class BigBirdProteinModel(nn.Module):
 
 # === Load model ===
 device = torch.device("cuda:1" if torch.cuda.device_count() > 1 else "cuda:0")
-num_classes = len(mlb.classes_)
-model = BigBirdProteinModel(input_dim=EMBEDDING_DIM, target_dim=num_classes, max_len=MAX_POS, vocab_size=vocab_size).to(device)
+model = BigBirdProteinModel(
+    input_dim=EMBEDDING_DIM,
+    target_dim=num_classes,
+    max_len=MAX_POS,
+    vocab_size=VOCAB_SIZE
+).to(device)
+
+print("Loading model checkpoint...")
 model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
 model.eval()
 
