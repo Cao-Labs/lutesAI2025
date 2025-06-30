@@ -2,7 +2,7 @@ import os
 import json
 import torch
 import torch.nn as nn
-from transformers import BigBirdModel
+from transformers import BigBirdModel, BigBirdConfig
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.preprocessing import MultiLabelBinarizer
 
@@ -17,6 +17,8 @@ ACTUAL_LABEL_PATH = "/data/summer2020/naufal/matched_ids_with_go.txt"
 BATCH_SIZE = 8
 THRESHOLD = 0.69
 EMBEDDING_DIM = 512
+MAX_POS = 512
+VOCAB_SIZE = 50265
 
 # === Load GO vocab and labels ===
 print("Loading GO vocab...")
@@ -56,25 +58,40 @@ embedding_tensor = torch.stack(embeddings).float()
 dataset = TensorDataset(embedding_tensor, label_tensor)
 dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False)
 
-# === Define Model ===
-class CustomBigBirdModel(nn.Module):
-    def __init__(self, num_classes):
+# === Match model to checkpoint ===
+class BigBirdProteinModel(nn.Module):
+    def __init__(self, input_dim, target_dim, max_len):
         super().__init__()
-        self.embedding_proj = nn.Linear(EMBEDDING_DIM, 768)
-        self.bigbird = BigBirdModel.from_pretrained('google/bigbird-roberta-base', ignore_mismatched_sizes=True)
-        self.classifier = nn.Linear(self.bigbird.config.hidden_size, num_classes)
+        self.project = nn.Linear(input_dim, 768)
+        config = BigBirdConfig(
+            vocab_size=VOCAB_SIZE,
+            hidden_size=768,
+            num_attention_heads=12,
+            num_hidden_layers=12,
+            attention_type="block_sparse",
+            block_size=64,
+            max_position_embeddings=max_len,
+            use_bias=True,
+            is_decoder=False,
+        )
+        self.bigbird = BigBirdModel(config)
+        self.classifier = nn.Sequential(
+            nn.Linear(768, 512),
+            nn.ReLU(),
+            nn.Linear(512, target_dim)
+        )
 
-    def forward(self, x):
-        x = self.embedding_proj(x)
-        x = x.unsqueeze(1)  # [B, 1, 768]
-        output = self.bigbird(inputs_embeds=x)
-        cls_output = output.last_hidden_state[:, 0, :]
-        return self.classifier(cls_output)
+    def forward(self, x, attention_mask):
+        x = self.project(x)
+        outputs = self.bigbird(inputs_embeds=x, attention_mask=attention_mask)
+        cls_output = outputs.last_hidden_state[:, 0, :]
+        logits = self.classifier(cls_output)
+        return logits
 
 # === Load model ===
 device = torch.device("cuda:1" if torch.cuda.device_count() > 1 else "cuda:0")
 num_classes = len(mlb.classes_)
-model = CustomBigBirdModel(num_classes).to(device)
+model = BigBirdProteinModel(input_dim=EMBEDDING_DIM, target_dim=num_classes, max_len=MAX_POS).to(device)
 model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
 model.eval()
 
@@ -82,13 +99,13 @@ model.eval()
 print("Running inference...")
 all_preds, all_true = [], []
 with torch.no_grad():
-    for batch in dataloader:
-        x, y = batch
-        x, y = x.to(device), y.to(device)
-        logits = model(x)
+    for x_batch, y_batch in dataloader:
+        attn_mask = (x_batch.sum(dim=2) != 0).long()
+        x_batch, y_batch, attn_mask = x_batch.to(device), y_batch.to(device), attn_mask.to(device)
+        logits = model(x_batch, attn_mask)
         probs = torch.sigmoid(logits)
         all_preds.append(probs.cpu())
-        all_true.append(y.cpu())
+        all_true.append(y_batch.cpu())
 
 all_preds = torch.cat(all_preds)
 all_true = torch.cat(all_true)
@@ -112,7 +129,7 @@ for i, pid in enumerate(ids):
 with open(PRED_OUTPUT, "w") as f:
     f.write("\n".join(pred_lines))
 
-# === Write actual ground truth in CAFA format ===
+# === Write ground truth in CAFA format ===
 print("Writing ground truth...")
 actual_lines = [
     "AUTHOR\tAlphaAnalyzers",
@@ -128,6 +145,6 @@ for i, pid in enumerate(ids):
 with open(ACTUAL_LABEL_PATH.replace(".txt", "_actual_cafa.txt"), "w") as f:
     f.write("\n".join(actual_lines))
 
-print("Done.")
+print("✅ Evaluation complete.")
 
 
