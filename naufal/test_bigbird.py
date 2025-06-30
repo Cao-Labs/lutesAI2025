@@ -2,80 +2,132 @@ import os
 import json
 import torch
 import torch.nn as nn
-from transformers import BigBirdModel, BigBirdConfig
-from tqdm import tqdm
+from transformers import BigBirdModel
+from torch.utils.data import DataLoader, TensorDataset
+from sklearn.preprocessing import MultiLabelBinarizer
 
-# === Config ===
+# === Paths ===
 EMBEDDING_DIR = "/data/summer2020/naufal/testing_pca"
-VOCAB_FILE = "/data/shared/github/lutesAI2025/naufal/go_vocab.json"
-MODEL_FILE = "/data/shared/github/lutesAI2025/naufal/bigbird_finetuned.pt"
-OUTPUT_FILE = "/data/summer2020/naufal/test_pred.txt"
-MAX_LEN = 512
-INPUT_DIM = 512
-DEVICE = torch.device("cuda:1" if torch.cuda.device_count() > 1 else "cuda:0")
+GO_VOCAB_PATH = "/data/shared/github/lutesAI2025/naufal/go_vocab.json"
+MODEL_PATH = "/data/shared/github/lutesAI2025/naufal/bigbird_finetuned.pt"
+PRED_OUTPUT = "/data/summer2020/naufal/test_pred.txt"
+ACTUAL_LABEL_PATH = "/data/summer2020/naufal/matched_ids_with_go.txt"
 
-# === Load GO vocab ===
-with open(VOCAB_FILE, "r") as f:
+# === Constants ===
+BATCH_SIZE = 8
+THRESHOLD = 0.69
+EMBEDDING_DIM = 512
+
+# === Load GO vocab and labels ===
+print("Loading GO vocab...")
+with open(GO_VOCAB_PATH) as f:
     go_vocab = json.load(f)
 
-idx_to_go = {v: k for k, v in go_vocab.items()}
-num_labels = len(go_vocab)
+go_classes = sorted(go_vocab.keys())
+mlb = MultiLabelBinarizer(classes=go_classes)
 
-# === Model Definition ===
-class BigBirdProteinModel(nn.Module):
-    def __init__(self, input_dim, target_dim, max_len):
+print("Loading ground truth labels...")
+labels_dict = {}
+with open(ACTUAL_LABEL_PATH, "r") as f:
+    for line in f:
+        parts = line.strip().split("\t")
+        if len(parts) != 2:
+            continue
+        pid, go_terms_str = parts
+        go_terms = [t.strip() for t in go_terms_str.split(",") if t.strip() in go_classes]
+        labels_dict[pid] = go_terms
+
+# === Gather matching .pt embeddings and labels ===
+embeddings, label_list, ids = [], [], []
+for fname in os.listdir(EMBEDDING_DIR):
+    if fname.endswith(".pt"):
+        pid = fname[:-3]
+        if pid in labels_dict:
+            emb = torch.load(os.path.join(EMBEDDING_DIR, fname))  # [512, 512]
+            embeddings.append(emb)
+            label_list.append(labels_dict[pid])
+            ids.append(pid)
+
+# === Convert to tensors ===
+print("Encoding labels...")
+label_tensor = torch.tensor(mlb.fit_transform(label_list), dtype=torch.float32)
+embedding_tensor = torch.stack(embeddings).float()
+
+dataset = TensorDataset(embedding_tensor, label_tensor)
+dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False)
+
+# === Define Model ===
+class CustomBigBirdModel(nn.Module):
+    def __init__(self, num_classes):
         super().__init__()
-        self.project = nn.Linear(input_dim, 768)
-        config = BigBirdConfig(
-            vocab_size=50265,
-            hidden_size=768,
-            num_attention_heads=12,
-            num_hidden_layers=12,
-            attention_type="block_sparse",
-            block_size=64,
-            max_position_embeddings=max_len,
-            use_bias=True,
-            is_decoder=False,
-        )
-        self.bigbird = BigBirdModel(config)
-        self.classifier = nn.Sequential(
-            nn.Linear(config.hidden_size, 512),
-            nn.ReLU(),
-            nn.Linear(512, target_dim)
-        )
+        self.embedding_proj = nn.Linear(EMBEDDING_DIM, 768)
+        self.bigbird = BigBirdModel.from_pretrained('google/bigbird-roberta-base', ignore_mismatched_sizes=True)
+        self.classifier = nn.Linear(self.bigbird.config.hidden_size, num_classes)
 
-    def forward(self, x, attention_mask):
-        x = self.project(x)
-        outputs = self.bigbird(inputs_embeds=x, attention_mask=attention_mask)
-        cls_output = outputs.last_hidden_state[:, 0, :]
-        logits = self.classifier(cls_output)
-        return logits
+    def forward(self, x):
+        x = self.embedding_proj(x)
+        x = x.unsqueeze(1)  # [B, 1, 768]
+        output = self.bigbird(inputs_embeds=x)
+        cls_output = output.last_hidden_state[:, 0, :]
+        return self.classifier(cls_output)
 
 # === Load model ===
-model = BigBirdProteinModel(INPUT_DIM, num_labels, MAX_LEN).to(DEVICE)
-model.load_state_dict(torch.load(MODEL_FILE, map_location=DEVICE))
+device = torch.device("cuda:1" if torch.cuda.device_count() > 1 else "cuda:0")
+num_classes = len(mlb.classes_)
+model = CustomBigBirdModel(num_classes).to(device)
+model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
 model.eval()
 
-# === Predict and write output ===
-with open(OUTPUT_FILE, "w") as out_f:
-    files = sorted(f for f in os.listdir(EMBEDDING_DIR) if f.endswith(".pt"))
-    print(f"[INFO] Found {len(files)} test embedding files")
+# === Run inference ===
+print("Running inference...")
+all_preds, all_true = [], []
+with torch.no_grad():
+    for batch in dataloader:
+        x, y = batch
+        x, y = x.to(device), y.to(device)
+        logits = model(x)
+        probs = torch.sigmoid(logits)
+        all_preds.append(probs.cpu())
+        all_true.append(y.cpu())
 
-    for i, fname in enumerate(tqdm(files)):
-        pid = fname[:-3]
-        embed = torch.load(os.path.join(EMBEDDING_DIR, fname)).to(DEVICE)
-        attn_mask = (embed.sum(dim=1) != 0).long().to(DEVICE)
+all_preds = torch.cat(all_preds)
+all_true = torch.cat(all_true)
+pred_binary = (all_preds > THRESHOLD).float()
+accuracy_per_label = (pred_binary == all_true).float().mean(dim=0)
 
-        with torch.no_grad():
-            logits = model(embed.unsqueeze(0), attn_mask.unsqueeze(0))
-            preds = torch.sigmoid(logits).squeeze().cpu()
-            go_indices = (preds >= 0.5).nonzero(as_tuple=True)[0].tolist()
-            go_terms = [idx_to_go[idx] for idx in go_indices if idx in idx_to_go]
+# === Write predictions in CAFA format ===
+print("Writing predictions...")
+pred_lines = [
+    "AUTHOR\tAlphaAnalyzers",
+    "MODEL\tProteinext",
+    "KEYWORDS\tde novo prediction, machine learning."
+]
 
-        out_f.write(f"{pid}\t{';'.join(go_terms)}\n")
+for i, pid in enumerate(ids):
+    for j, go_term in enumerate(mlb.classes_):
+        if pred_binary[i, j] == 1:
+            acc = round(accuracy_per_label[j].item(), 2)
+            pred_lines.append(f"{pid}\t{go_term}\t{acc}")
 
-        if i == 0 or (i + 1) % 1000 == 0:
-            print(f"[✓] Predicted {i + 1} proteins")
+with open(PRED_OUTPUT, "w") as f:
+    f.write("\n".join(pred_lines))
 
-print(f"[✓] Predictions saved to {OUTPUT_FILE}")
+# === Write actual ground truth in CAFA format ===
+print("Writing ground truth...")
+actual_lines = [
+    "AUTHOR\tAlphaAnalyzers",
+    "MODEL\tProteinext",
+    "KEYWORDS\tde novo prediction, machine learning."
+]
+
+for i, pid in enumerate(ids):
+    for j, go_term in enumerate(mlb.classes_):
+        if all_true[i, j] == 1:
+            actual_lines.append(f"{pid}\t{go_term}")
+
+with open(ACTUAL_LABEL_PATH.replace(".txt", "_actual_cafa.txt"), "w") as f:
+    f.write("\n".join(actual_lines))
+
+print("Done.")
+
 
