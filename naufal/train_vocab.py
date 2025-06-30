@@ -1,5 +1,4 @@
 import os
-import json
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
@@ -7,14 +6,40 @@ from transformers import BigBirdModel, BigBirdConfig
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from collections import defaultdict
-from sklearn.metrics import f1_score
 from tqdm import tqdm
 
-# === Dataset Class ===
+# === Step 1: Parse GO DAG from OBO file ===
+def extract_go_graph(obo_path):
+    go_graph = defaultdict(set)
+    current_id = None
+    with open(obo_path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if line == "[Term]":
+                current_id = None
+            elif line.startswith("id: GO:"):
+                current_id = line.split("id: ")[1]
+            elif line.startswith("is_a:") and current_id:
+                parent = line.split("is_a: ")[1].split()[0]
+                go_graph[current_id].add(parent)
+    return go_graph
+
+# === Step 2: Propagate GO terms upward ===
+def propagate_terms(go_terms, go_graph):
+    visited = set()
+    stack = list(go_terms)
+    while stack:
+        term = stack.pop()
+        if term not in visited:
+            visited.add(term)
+            stack.extend(go_graph.get(term, []))
+    return visited
+
+# === Dataset with GO propagation ===
 class ProteinFunctionDataset(Dataset):
-    def __init__(self, embedding_dir, go_mapping_file):
+    def __init__(self, embedding_dir, go_mapping_file, go_graph):
         self.embedding_dir = embedding_dir
-        self.go_mapping_file = go_mapping_file
+        self.go_graph = go_graph
 
         print("[INFO] Scanning embedding files...")
         self.ids = set(fname[:-3] for fname in os.listdir(embedding_dir) if fname.endswith(".pt"))
@@ -23,18 +48,19 @@ class ProteinFunctionDataset(Dataset):
         self.go_labels = defaultdict(list)
         go_terms_set = set()
 
-        print("[INFO] Parsing GO annotations...")
+        print("[INFO] Parsing GO annotations and propagating...")
         with open(go_mapping_file, "r") as f:
             for line in f:
                 pid, terms = line.strip().split("\t")
                 if pid in self.ids:
-                    term_list = terms.split(";")
-                    self.go_labels[pid] = term_list
-                    go_terms_set.update(term_list)
+                    term_list = [t.strip() for t in terms.split(";") if t.strip()]
+                    full_terms = propagate_terms(term_list, go_graph)
+                    self.go_labels[pid] = list(full_terms)
+                    go_terms_set.update(full_terms)
 
         self.go_vocab = {go_term: idx for idx, go_term in enumerate(sorted(go_terms_set))}
         self.num_labels = len(self.go_vocab)
-        print(f"[INFO] GO vocabulary size: {self.num_labels:,}")
+        print(f"[INFO] GO vocabulary size after propagation: {self.num_labels:,}")
 
         self.ids = list(self.ids)
 
@@ -44,8 +70,8 @@ class ProteinFunctionDataset(Dataset):
     def __getitem__(self, idx):
         pid = self.ids[idx]
         embedding = torch.load(os.path.join(self.embedding_dir, f"{pid}.pt"))  # [512, 512]
-
         attention_mask = (embedding.sum(dim=1) != 0).long()  # [512]
+
         target = torch.zeros(self.num_labels)
         for term in self.go_labels.get(pid, []):
             if term in self.go_vocab:
@@ -53,13 +79,13 @@ class ProteinFunctionDataset(Dataset):
 
         return embedding, attention_mask, target
 
-# === Model Definition ===
+# === BigBird Model ===
 class BigBirdProteinModel(nn.Module):
     def __init__(self, input_dim, target_dim, max_len):
         super().__init__()
         self.project = nn.Linear(input_dim, 768)
         config = BigBirdConfig(
-            vocab_size=50265,
+            vocab_size=26879,  # FIXED to match your tokenizer vocab
             hidden_size=768,
             num_attention_heads=12,
             num_hidden_layers=12,
@@ -71,19 +97,18 @@ class BigBirdProteinModel(nn.Module):
         )
         self.bigbird = BigBirdModel(config)
         self.classifier = nn.Sequential(
-            nn.Linear(config.hidden_size, 512),
+            nn.Linear(768, 512),
             nn.ReLU(),
             nn.Linear(512, target_dim)
         )
 
     def forward(self, x, attention_mask):
-        x = self.project(x)  # [B, L, 768]
+        x = self.project(x)
         outputs = self.bigbird(inputs_embeds=x, attention_mask=attention_mask)
-        cls_output = outputs.last_hidden_state[:, 0, :]  # [B, 768]
-        logits = self.classifier(cls_output)  # [B, num_labels]
-        return logits
+        cls_output = outputs.last_hidden_state[:, 0, :]
+        return self.classifier(cls_output)
 
-# === Training Function ===
+# === Training Loop ===
 def train():
     device = torch.device("cuda:1" if torch.cuda.device_count() > 1 else "cuda:0")
     batch_size = 16
@@ -91,10 +116,16 @@ def train():
     learning_rate = 1e-5
     min_lr = 1e-7
 
-    dataset = ProteinFunctionDataset(
-        "/data/summer2020/naufal/final_embeddings_pca",
-        "/data/summer2020/naufal/matched_ids_with_go.txt"
-    )
+    # Paths
+    obo_path = "/data/shared/databases/UniProt2025/GO_June_1_2025.obo"
+    embedding_dir = "/data/summer2020/naufal/final_embeddings_pca"
+    go_mapping_file = "/data/summer2020/naufal/matched_ids_with_go.txt"
+
+    print("[INFO] Parsing GO DAG...")
+    go_graph = extract_go_graph(obo_path)
+
+    print("[INFO] Loading dataset...")
+    dataset = ProteinFunctionDataset(embedding_dir, go_mapping_file, go_graph)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
 
     model = BigBirdProteinModel(input_dim=512, target_dim=dataset.num_labels, max_len=512).to(device)
@@ -105,11 +136,10 @@ def train():
     model.train()
 
     for epoch in range(epochs):
-        print(f"\n[Epoch {epoch + 1}/{epochs}]")
+        print(f"\n[Epoch {epoch+1}/{epochs}]")
         epoch_loss = 0.0
         for i, (x, attn_mask, y) in enumerate(tqdm(dataloader)):
             x, attn_mask, y = x.to(device), attn_mask.to(device), y.to(device)
-
             optimizer.zero_grad()
             preds = model(x, attn_mask)
             loss = criterion(preds, y)
@@ -118,21 +148,22 @@ def train():
 
             epoch_loss += loss.item()
 
-            if i == 0 or (i + 1) % 10000 == 0:
+            if i == 0 or (i + 1) % 500 == 0:
                 print(f"[✓] Trained {i + 1:,} proteins")
 
         avg_loss = epoch_loss / len(dataloader)
-        print(f"[INFO] Avg Loss: {avg_loss:.4f}")
+        print(f"[INFO] Epoch {epoch+1} Avg Loss: {avg_loss:.4f}")
         scheduler.step(avg_loss)
 
-    # Save model
     torch.save(model.state_dict(), "bigbird_finetuned.pt")
     print("[✓] Model saved as bigbird_finetuned.pt")
 
-    # Save GO vocab
-    with open("go_vocab.json", "w") as f:
-        json.dump(dataset.go_vocab, f)
-    print("[✓] GO vocab saved as go_vocab.json")
+# Save GO vocab to disk
+import json
+with open("go_vocab.json", "w") as f:
+    json.dump(dataset.go_vocab, f)
+print("[✓] Saved GO vocabulary to go_vocab.json")
+
 
 # === Entry Point ===
 if __name__ == "__main__":
