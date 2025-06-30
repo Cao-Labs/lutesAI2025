@@ -41,10 +41,12 @@ class BigBirdProteinModel(nn.Module):
         logits = self.classifier(cls_output)
         return logits
 
-# === Load GO vocab ===
+# === Load GO vocab and fix mapping ===
 with open(GO_VOCAB_PATH, "r") as f:
     go_vocab = json.load(f)
-idx_to_go = {idx: go for go, idx in go_vocab.items()}
+
+# Correct: index → GO term
+idx_to_go = {v: k for k, v in go_vocab.items()}
 num_labels = len(idx_to_go)
 
 # === Load model ===
@@ -62,26 +64,26 @@ with open(OUTPUT_PATH, "w") as out_f:
             continue
 
         pid = fname[:-3]
-        embedding = torch.load(os.path.join(EMBEDDING_DIR, fname))  # [512, 512]
-        attn_mask = (embedding.sum(dim=1) != 0).long()  # [512]
+        embedding = torch.load(os.path.join(EMBEDDING_DIR, fname))  # shape [512, 512]
+        attn_mask = (embedding.sum(dim=1) != 0).long()  # shape [512]
 
-        x = embedding.unsqueeze(0).to(device)  # [1, 512, 512]
-        attn_mask = attn_mask.unsqueeze(0).to(device)  # [1, 512]
+        x = embedding.unsqueeze(0).to(device)         # shape [1, 512, 512]
+        attn_mask = attn_mask.unsqueeze(0).to(device) # shape [1, 512]
 
         with torch.no_grad():
-            logits = model(x, attn_mask)  # [1, num_labels]
-            probs = sigmoid(logits).squeeze(0)  # [num_labels]
+            logits = model(x, attn_mask)  # shape [1, num_labels]
+            probs = sigmoid(logits).squeeze(0)  # shape [num_labels]
 
-            # === Predict with threshold ===
+            # === Threshold prediction ===
             threshold = 0.5
             above_thresh = (probs >= threshold).nonzero(as_tuple=True)[0].tolist()
 
             if above_thresh:
                 predicted_terms = [idx_to_go[idx] for idx in above_thresh]
             else:
-                # Fallback: top 3 if none above threshold
-                topk = 3
-                top_indices = torch.topk(probs, k=topk).indices.tolist()
+                # === Top-3 fallback ===
+                top_indices = torch.topk(probs, k=3).indices.tolist()
                 predicted_terms = [idx_to_go[idx] for idx in top_indices]
 
         out_f.write(f"{pid}\t{';'.join(predicted_terms)}\n")
+
