@@ -46,13 +46,13 @@ class BigBirdProteinModel(nn.Module):
 def test():
     device = torch.device("cuda:1" if torch.cuda.device_count() > 1 else "cuda:0")
     batch_size = 16
-    threshold = 0.5
+    threshold = 0.69
 
     # === Paths ===
     embedding_dir = "/data/summer2020/naufal/testing_pca"
     vocab_path = "/data/shared/github/lutesAI2025/naufal/go_vocab.json"
-    model_path = "/data/shared/github/lutesAI2025/naufal/bigbird_finetuned.pt"
-    output_file = "test_pred.txt"
+    model_path = "/data/shared/github/lutesAI2025/naufal/bigbird_finetuned2.pt"
+    output_file = "test_pred2.txt"
 
     print("[INFO] Loading GO vocabulary...")
     with open(vocab_path, "r") as f:
