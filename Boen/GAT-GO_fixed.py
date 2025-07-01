@@ -9,28 +9,26 @@ current_file_path = os.path.dirname(os.path.realpath(__file__))
 DATA_PATH = current_file_path + '/data/'
 
 def predict(model, loader, device):
-    torch.cuda.set_device(device)
     results = dict()
     for data in loader:
-        with torch.cuda.amp.autocast():
-            # Correct tensor shapes for Conv1d: [batch, channels, sequence_length]
-            esm_rep = data.x.T.unsqueeze(0).cuda()     # [1, 1280, seq_len]
-            seq = data.seq.T.unsqueeze(0).cuda()       # [1, 25, seq_len]  
-            contact = data.edge_index.cuda()
-            pssm = data.pssm.T.unsqueeze(0).cuda()     # [1, 20, seq_len]
-            seq_embed = data.seq_embed.cuda()
-            label = data.label
-            batch_idx = data.batch.cuda()
-            
-            model_pred = torch.sigmoid(model(
-                esm_rep=esm_rep, 
-                seq=seq, 
-                pssm=pssm, 
-                seq_embed=seq_embed, 
-                A=contact, 
-                batch=batch_idx
-            )).cpu().detach().numpy()
-            
+        # Run on CPU to avoid CUDA issues
+        esm_rep = data.x.T.unsqueeze(0).cpu()     # [1, 1280, seq_len]
+        seq = data.seq.T.unsqueeze(0).cpu()       # [1, 25, seq_len]  
+        contact = data.edge_index.cpu()
+        pssm = data.pssm.T.unsqueeze(0).cpu()     # [1, 20, seq_len]
+        seq_embed = data.seq_embed.cpu()
+        label = data.label
+        batch_idx = data.batch.cpu()
+        
+        model_pred = torch.sigmoid(model(
+            esm_rep=esm_rep, 
+            seq=seq, 
+            pssm=pssm, 
+            seq_embed=seq_embed, 
+            A=contact, 
+            batch=batch_idx
+        )).cpu().detach().numpy()
+        
         for i, chain_id in enumerate(data.chain_id):
             results[chain_id] = model_pred[i, :]
     return results
@@ -66,13 +64,12 @@ if __name__ == '__main__':
     )
     loader = DataLoader(Dset, batch_size=args.BatchSize)
     
-    # Set device
+    # Set device to CPU
     device = torch.device('cpu')
-    torch.cuda.set_device(args.Device)
     
-    # Load model
+    # Load model on CPU
     check_point = torch.load(args.ModelPath, map_location=device)
-    model = Gnn_PF_fixed.GnnPF().cuda()
+    model = Gnn_PF_fixed.GnnPF().cpu()  # Load model on CPU
     model.load_state_dict(check_point['state_dict'])
     model.eval()
     
