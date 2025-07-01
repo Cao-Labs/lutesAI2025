@@ -14,3 +14,7 @@ def validate_pt_file(filepath):
     except Exception as e:
         print(f"ERROR loading {filepath}: {e}")
         return False
+
+# Test first file
+first_protein = open('my_sequences_processed.txt').readline().strip()
+validate_pt_file(f'data/{first_protein}.pt')
