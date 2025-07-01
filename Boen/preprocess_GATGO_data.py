@@ -8,6 +8,7 @@ import os
 import gzip
 import torch
 import numpy as np
+import tempfile
 from Bio import SeqIO
 from Bio.PDB import PDBParser
 import esm
@@ -75,46 +76,53 @@ def generate_esm_embeddings(sequence, model, batch_converter, device='cpu'):
 
 def extract_contact_map(pdb_file, distance_threshold=8.0):
     """Extract contact map from PDB structure"""
+    import tempfile
+    
+    # Handle gzipped PDB files
     if pdb_file.endswith('.gz'):
         with gzip.open(pdb_file, 'rt') as f:
             pdb_content = f.read()
-            # Write temporary file
-            temp_pdb = pdb_file.replace('.gz', '.temp')
-            with open(temp_pdb, 'w') as temp_f:
-                temp_f.write(pdb_content)
-            pdb_file = temp_pdb
+        
+        # Create temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.pdb', delete=False) as temp_f:
+            temp_f.write(pdb_content)
+            temp_pdb_path = temp_f.name
+    else:
+        temp_pdb_path = pdb_file
     
-    parser = PDBParser(QUIET=True)
-    structure = parser.get_structure('protein', pdb_file)
-    
-    # Get CA atoms
-    ca_atoms = []
-    for model in structure:
-        for chain in model:
-            for residue in chain:
-                if residue.has_id('CA'):
-                    ca_atoms.append(residue['CA'])
-    
-    # Calculate distances and create contact map
-    n_residues = len(ca_atoms)
-    edge_indices = []
-    
-    for i in range(n_residues):
-        for j in range(i+1, n_residues):
-            distance = ca_atoms[i] - ca_atoms[j]  # BioPython calculates distance automatically
-            if distance <= distance_threshold:
-                edge_indices.append([i, j])
-                edge_indices.append([j, i])  # Add both directions
-    
-    # Clean up temp file if created
-    if pdb_file.endswith('.temp'):
-        os.remove(pdb_file)
-    
-    if len(edge_indices) == 0:
-        # If no contacts, create self-loops
-        edge_indices = [[i, i] for i in range(n_residues)]
-    
-    return torch.tensor(edge_indices, dtype=torch.long).t()
+    try:
+        parser = PDBParser(QUIET=True)
+        structure = parser.get_structure('protein', temp_pdb_path)
+        
+        # Get CA atoms
+        ca_atoms = []
+        for model in structure:
+            for chain in model:
+                for residue in chain:
+                    if residue.has_id('CA'):
+                        ca_atoms.append(residue['CA'])
+        
+        # Calculate distances and create contact map
+        n_residues = len(ca_atoms)
+        edge_indices = []
+        
+        for i in range(n_residues):
+            for j in range(i+1, n_residues):
+                distance = ca_atoms[i] - ca_atoms[j]  # BioPython calculates distance automatically
+                if distance <= distance_threshold:
+                    edge_indices.append([i, j])
+                    edge_indices.append([j, i])  # Add both directions
+        
+        if len(edge_indices) == 0:
+            # If no contacts, create self-loops
+            edge_indices = [[i, i] for i in range(n_residues)]
+        
+        return torch.tensor(edge_indices, dtype=torch.long).t()
+        
+    finally:
+        # Clean up temporary file if we created one
+        if pdb_file.endswith('.gz') and os.path.exists(temp_pdb_path):
+            os.remove(temp_pdb_path)
 
 def generate_dummy_pssm(sequence_length):
     """Generate dummy PSSM (you should replace this with real PSSM generation)"""
@@ -197,16 +205,16 @@ def main():
     successful = 0
     failed = 0
     
+    # Get list of all PDB files and create lookup
+    pdb_files = [f for f in os.listdir(args.pdb_dir) if f.endswith('.pdb.gz')]
+    pdb_lookup = {f.replace('.pdb.gz', ''): f for f in pdb_files}
+    print(f"Found {len(pdb_files)} PDB files")
+    
     for protein_id, sequence in tqdm(sequences.items()):
         # Find corresponding PDB file
-        pdb_file = None
-        for ext in ['.pdb.gz', '.pdb']:
-            potential_file = os.path.join(args.pdb_dir, f"{protein_id}{ext}")
-            if os.path.exists(potential_file):
-                pdb_file = potential_file
-                break
-        
-        if pdb_file is None:
+        if protein_id in pdb_lookup:
+            pdb_file = os.path.join(args.pdb_dir, pdb_lookup[protein_id])
+        else:
             print(f"Warning: No PDB file found for {protein_id}")
             failed += 1
             continue
