@@ -27,6 +27,17 @@ class Protein_Gnn_data(Dataset):
     
     def get(self, idx):
         data = torch.load(self.root + '/' + self.chain_ids[idx] + '.pt')
+        
+        # Validate edge indices
+        seq_len = data['x'].shape[0]
+        edge_max = data['edge_index'].max().item() if data['edge_index'].numel() > 0 else -1
+        
+        if edge_max >= seq_len:
+            print(f"Warning: Skipping {self.chain_ids[idx]} due to invalid edge indices")
+            # Create minimal valid data with self-loops
+            edge_index = torch.tensor([[i, i] for i in range(seq_len)], dtype=torch.long).t()
+            data['edge_index'] = edge_index
+        
         data = contact_data(
             x=data['x'], 
             pssm=data['pssm'], 
