@@ -5,6 +5,7 @@ import json
 # === File paths ===
 pred_file = "/data/shared/github/lutesAI2025/naufal/test_pred.txt"
 true_file = "/data/summer2020/naufal/matched_ids_with_go.txt"
+vocab_file = "/data/shared/github/lutesAI2025/naufal/go_vocab.json"
 
 # === Load predictions first ===
 pred_annots = {}
@@ -16,7 +17,7 @@ with open(pred_file, "r") as f:
         pid, terms = parts
         pred_annots[pid] = set(terms.split(";")) if terms else set()
 
-# === Load ONLY true annotations for predicted proteins ===
+# === Load only true annotations for predicted proteins ===
 true_annots = {}
 with open(true_file, "r") as f:
     for line in f:
@@ -26,6 +27,11 @@ with open(true_file, "r") as f:
         pid, terms = parts
         if pid in pred_annots:
             true_annots[pid] = set(terms.split(";"))
+
+# === Load GO vocabulary ===
+with open(vocab_file, "r") as vf:
+    go_vocab = json.load(vf)
+    total_vocab = len(go_vocab)
 
 # === Initialize metrics ===
 TP_total = 0
@@ -52,44 +58,6 @@ for pid, predicted in pred_annots.items():
     FN_total += fn
 
     prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    rec = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    fscore = (2 * prec * rec) / (prec + rec) if (prec + rec) > 0 else 0.0
-
-    smin = math.sqrt(fp**2 + fn**2)
-
-    all_precisions.append(prec)
-    all_recalls.append(rec)
-    all_fmax.append(fscore)
-    smin_sum += smin
-    valid += 1
-
-# === Estimate TN ===
-# We assume number of GO terms in prediction space = total_vocab
-vocab_file = "/data/shared/github/lutesAI2025/naufal/go_vocab.json"
-with open(vocab_file, "r") as vf:
-    go_vocab = json.load(vf)
-    total_vocab = len(go_vocab)
-
-# Total possible labels: N × V
-total_labels = valid * total_vocab
-TN_total = total_labels - (TP_total + FP_total + FN_total)
-
-# === Averages ===
-avg_precision = sum(all_precisions) / valid if valid else 0.0
-avg_recall = sum(all_recalls) / valid if valid else 0.0
-avg_fmax = sum(all_fmax) / valid if valid else 0.0
-avg_smin = smin_sum / valid if valid else 0.0
-
-# === Report ===
-print(f"\n[Evaluation Metrics]")
-print(f"Precision:  {avg_precision:.4f}")
-print(f"Recall:     {avg_recall:.4f}")
-print(f"Fmax:       {avg_fmax:.4f}")
-print(f"Smin:       {avg_smin:.4f}")
-print(f"\n[Confusion Totals]")
-print(f"TP: {TP_total}")
-print(f"FP: {FP_total}")
-print(f"FN: {FN_total}")
-print(f"TN: {TN_total} (estimated from {valid} proteins × {total_vocab} GO terms)")
+    rec = tp / (tp + fn) if (tp + fn) > 0 else 0.
 
 
