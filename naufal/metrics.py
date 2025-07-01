@@ -6,17 +6,7 @@ from collections import defaultdict
 pred_file = "/data/shared/github/lutesAI2025/naufal/test_pred.txt"
 true_file = "/data/summer2020/naufal/matched_ids_with_go.txt"
 
-# === Load true annotations ===
-true_annots = {}
-with open(true_file, "r") as f:
-    for line in f:
-        parts = line.strip().split("\t")
-        if len(parts) != 2:
-            continue
-        pid, terms = parts
-        true_annots[pid] = set(terms.split(";"))
-
-# === Load predictions ===
+# === Load predictions first ===
 pred_annots = {}
 with open(pred_file, "r") as f:
     for line in f:
@@ -25,6 +15,17 @@ with open(pred_file, "r") as f:
             continue
         pid, terms = parts
         pred_annots[pid] = set(terms.split(";")) if terms else set()
+
+# === Load ONLY true annotations that are in predictions ===
+true_annots = {}
+with open(true_file, "r") as f:
+    for line in f:
+        parts = line.strip().split("\t")
+        if len(parts) != 2:
+            continue
+        pid, terms = parts
+        if pid in pred_annots:
+            true_annots[pid] = set(terms.split(";"))
 
 # === Compute metrics ===
 TP, FP, FN = 0, 0, 0
@@ -47,7 +48,7 @@ for pid, predicted in pred_annots.items():
     rec = tp / (tp + fn) if (tp + fn) > 0 else 0.0
     fscore = (2 * prec * rec) / (prec + rec) if (prec + rec) > 0 else 0.0
 
-    # For Smin (simplified: use fp and fn as proxies for information content)
+    # Smin: using FP and FN as proxies for IC
     smin = math.sqrt(fp**2 + fn**2)
 
     all_precisions.append(prec)
@@ -67,3 +68,4 @@ print(f"Precision: {avg_precision:.4f}")
 print(f"Recall:    {avg_recall:.4f}")
 print(f"Fmax:      {avg_fmax:.4f}")
 print(f"Smin:      {avg_smin:.4f}")
+
