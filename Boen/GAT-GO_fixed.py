@@ -1,7 +1,7 @@
 import os
 import torch
 import argparse
-from src import GnnPF, data_loader
+from src import Gnn_PF_fixed, data_loader_fixed
 from torch.utils import data as D
 from torch_geometric.data import DataLoader
 
@@ -59,7 +59,7 @@ if __name__ == '__main__':
         os.makedirs(args.OutDir, exist_ok=True)
     
     # Load dataset
-    Dset = data_loader.Protein_Gnn_data(
+    Dset = data_loader_fixed.Protein_Gnn_data(
         root=DATA_PATH, 
         chain_list=args.SeqIDs
     )
@@ -71,7 +71,7 @@ if __name__ == '__main__':
     
     # Load model
     check_point = torch.load(args.ModelPath, map_location=device)
-    model = GnnPF.GnnPF().cuda()
+    model = Gnn_PF_fixed.GnnPF().cuda()
     model.load_state_dict(check_point['state_dict'])
     model.eval()
     
