@@ -51,7 +51,7 @@ def test():
     # === Paths ===
     embedding_dir = "/data/summer2020/naufal/testing_pca"
     vocab_path = "/data/shared/github/lutesAI2025/naufal/go_vocab.json"
-    model_path = "/data/shared/github/lutesAI2025/naufal/bigbird_finetuned2.pt"
+    model_path = "/data/shared/github/lutesAI2025/naufal/bigbird_finetuned.pt"
     output_file = "test_pred2.txt"
 
     print("[INFO] Loading GO vocabulary...")
