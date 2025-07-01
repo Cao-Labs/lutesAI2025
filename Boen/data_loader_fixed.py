@@ -7,6 +7,8 @@ class contact_data(Data):
     def __cat_dim__(self, key, item):
         if key in ['seq_embed', 'label', 'chain_id']:
             return None
+        elif key in ['x', 'seq', 'pssm']:
+            return 0  # Concatenate along sequence dimension
         else:
             return super().__cat_dim__(key, item)
 
@@ -27,8 +29,8 @@ class Protein_Gnn_data(Dataset):
         data = torch.load(self.root + '/' + self.chain_ids[idx] + '.pt')
         data = contact_data(
             x=data['x'], 
-            pssm=data['pssm'].T, 
-            seq=data['seq'].T, 
+            pssm=data['pssm'], 
+            seq=data['seq'], 
             edge_index=data['edge_index'], 
             seq_embed=data['seq_embed'], 
             label=data['label'], 

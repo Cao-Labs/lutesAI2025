@@ -13,10 +13,11 @@ def predict(model, loader, device):
     results = dict()
     for data in loader:
         with torch.cuda.amp.autocast():
-            esm_rep = data.x.T.unsqueeze(0).cuda()
-            seq = data.seq.T.unsqueeze(0).cuda()
+            # Fix: Don't transpose here, data should already be in correct format
+            esm_rep = data.x.unsqueeze(0).cuda()  # Remove .T
+            seq = data.seq.unsqueeze(0).cuda()    # Remove .T  
             contact = data.edge_index.cuda()
-            pssm = data.pssm.T.unsqueeze(0).cuda()
+            pssm = data.pssm.unsqueeze(0).cuda()  # Remove .T
             seq_embed = data.seq_embed.cuda()
             label = data.label
             batch_idx = data.batch.cuda()
