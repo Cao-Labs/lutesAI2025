@@ -13,11 +13,11 @@ def predict(model, loader, device):
     results = dict()
     for data in loader:
         with torch.cuda.amp.autocast():
-            # Fix: Don't transpose here, data should already be in correct format
-            esm_rep = data.x.unsqueeze(0).cuda()  # Remove .T
-            seq = data.seq.unsqueeze(0).cuda()    # Remove .T  
+            # Correct tensor shapes for Conv1d: [batch, channels, sequence_length]
+            esm_rep = data.x.T.unsqueeze(0).cuda()     # [1, 1280, seq_len]
+            seq = data.seq.T.unsqueeze(0).cuda()       # [1, 25, seq_len]  
             contact = data.edge_index.cuda()
-            pssm = data.pssm.unsqueeze(0).cuda()  # Remove .T
+            pssm = data.pssm.T.unsqueeze(0).cuda()     # [1, 20, seq_len]
             seq_embed = data.seq_embed.cuda()
             label = data.label
             batch_idx = data.batch.cuda()
