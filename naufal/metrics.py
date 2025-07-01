@@ -1,13 +1,10 @@
 import os
 import math
+import json
 from collections import defaultdict
+from tqdm import tqdm
 
-# === File paths ===
-pred_file = "/data/shared/github/lutesAI2025/naufal/test_pred.txt"
-true_file = "/data/summer2020/naufal/matched_ids_with_go.txt"
-obo_path = "/data/shared/databases/UniProt2025/GO_June_1_2025.obo"
-
-# === Step 1: Parse GO DAG from OBO file ===
+# === Load GO DAG from OBO file ===
 def extract_go_graph(obo_path):
     go_graph = defaultdict(set)
     current_id = None
@@ -23,10 +20,10 @@ def extract_go_graph(obo_path):
                 go_graph[current_id].add(parent)
     return go_graph
 
-# === Step 2: Propagate GO terms upward ===
-def propagate_terms(go_terms, go_graph):
+# === Propagate terms to ancestors ===
+def get_all_ancestors(term_set, go_graph):
     visited = set()
-    stack = list(go_terms)
+    stack = list(term_set)
     while stack:
         term = stack.pop()
         if term not in visited:
@@ -34,75 +31,81 @@ def propagate_terms(go_terms, go_graph):
             stack.extend(go_graph.get(term, []))
     return visited
 
-# === Step 3: Load GO graph ===
-go_graph = extract_go_graph(obo_path)
+# === Compute semantic similarity ===
+def semantic_overlap(predicted, actual, go_graph):
+    pred_ancestors = get_all_ancestors(predicted, go_graph)
+    actual_ancestors = get_all_ancestors(actual, go_graph)
+    common = pred_ancestors & actual_ancestors
+    return len(common), len(pred_ancestors), len(actual_ancestors)
 
-# === Step 4: Load true annotations with propagation ===
+# === Paths ===
+obo_file = "/data/shared/databases/UniProt2025/GO_June_1_2025.obo"
+true_file = "/data/summer2020/naufal/matched_ids_with_go.txt"
+pred_file = "/data/shared/github/lutesAI2025/naufal/test_pred.txt"
+
+# === Load GO graph ===
+print("[INFO] Loading GO DAG...")
+go_graph = extract_go_graph(obo_file)
+
+# === Load true annotations ===
 true_annots = {}
 with open(true_file, "r") as f:
     for line in f:
-        parts = line.strip().split("\t")
-        if len(parts) != 2:
+        if "\t" not in line:
             continue
-        pid, terms = parts
-        raw_terms = [t for t in terms.split(";") if t]
-        propagated_terms = propagate_terms(raw_terms, go_graph)
-        true_annots[pid] = set(propagated_terms)
+        pid, terms = line.strip().split("\t")
+        true_annots[pid] = set(t for t in terms.split(";") if t)
 
-# === Step 5: Load predictions (no propagation needed) ===
+# === Load predictions ===
 pred_annots = {}
 with open(pred_file, "r") as f:
     for line in f:
-        parts = line.strip().split("\t")
-        if len(parts) != 2:
+        if "\t" not in line:
             continue
-        pid, terms = parts
-        pred_annots[pid] = set(terms.split(";")) if terms else set()
+        pid, terms = line.strip().split("\t")
+        pred_annots[pid] = set(t for t in terms.split(";") if t)
 
-# === Step 6: Compute metrics ===
-TP, FP, FN = 0, 0, 0
-all_precisions = []
-all_recalls = []
-all_fmax = []
-smin_sum = 0
+# === Evaluate ===
+print("[INFO] Evaluating predictions (semantic)...")
+total_sim_precision = 0
+total_sim_recall = 0
+total_fmax = 0
+total_smin = 0
 valid = 0
+TP = FP = FN = 0
 
-for pid, predicted in pred_annots.items():
+for pid, predicted in tqdm(pred_annots.items()):
     if pid not in true_annots:
         continue
-
     actual = true_annots[pid]
+
+    # Raw counts
     tp = len(predicted & actual)
     fp = len(predicted - actual)
     fn = len(actual - predicted)
-
-    prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    rec = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    fscore = (2 * prec * rec) / (prec + rec) if (prec + rec) > 0 else 0.0
-
-    smin = math.sqrt(fp**2 + fn**2)
-
     TP += tp
     FP += fp
     FN += fn
-    all_precisions.append(prec)
-    all_recalls.append(rec)
-    all_fmax.append(fscore)
-    smin_sum += smin
+
+    # Semantic
+    common, pred_total, actual_total = semantic_overlap(predicted, actual, go_graph)
+    precision = common / pred_total if pred_total else 0
+    recall = common / actual_total if actual_total else 0
+    fscore = (2 * precision * recall) / (precision + recall) if (precision + recall) else 0
+    smin = math.sqrt((pred_total - common) ** 2 + (actual_total - common) ** 2)
+
+    total_sim_precision += precision
+    total_sim_recall += recall
+    total_fmax += fscore
+    total_smin += smin
     valid += 1
 
-# === Step 7: Report ===
-avg_precision = sum(all_precisions) / valid if valid else 0.0
-avg_recall = sum(all_recalls) / valid if valid else 0.0
-avg_fmax = sum(all_fmax) / valid if valid else 0.0
-avg_smin = smin_sum / valid if valid else 0.0
+# === Report ===
+print("\n[Semantic Evaluation Metrics]")
+print(f"Valid proteins evaluated: {valid}")
+print(f"TP: {TP}, FP: {FP}, FN: {FN}")
+print(f"Precision (semantic): {total_sim_precision / valid:.4f}")
+print(f"Recall    (semantic): {total_sim_recall / valid:.4f}")
+print(f"Fmax      (semantic): {total_fmax / valid:.4f}")
+print(f"Smin      (semantic): {total_smin / valid:.4f}")
 
-print(f"\n[Evaluation Metrics — Propagated GO Terms]")
-print(f"Proteins evaluated: {valid}")
-print(f"True Positives (TP): {TP}")
-print(f"False Positives (FP): {FP}")
-print(f"False Negatives (FN): {FN}")
-print(f"Precision: {avg_precision:.4f}")
-print(f"Recall:    {avg_recall:.4f}")
-print(f"Fmax:      {avg_fmax:.4f}")
-print(f"Smin:      {avg_smin:.4f}")
