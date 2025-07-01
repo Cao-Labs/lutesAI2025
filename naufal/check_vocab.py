@@ -7,7 +7,7 @@ vocab_set = set(json.load(open("go_vocab.json")).keys())
 covered = 0
 total = 0
 
-with open("matched_ids_with_go.txt") as f:
+with open("/data/summer2020/naufal/matched_ids_with_go.txt") as f:
     for line in f:
         parts = line.strip().split("\t")
         if len(parts) != 2:
