@@ -1,0 +1,57 @@
+name: heal
+channels:
+  - conda-forge
+  - pytorch
+  - bioconda
+  - defaults
+dependencies:
+  # Core Python and system
+  - python=3.7
+  - pip
+  
+  # CUDA and PyTorch
+  - cudatoolkit=10.2
+  - pytorch=1.7.0
+  
+  # Scientific computing essentials
+  - numpy=1.20.3
+  - scipy=1.6.2
+  - pandas=1.2.4
+  - matplotlib=3.3.4
+  - scikit-learn=0.24.2
+  
+  # Bioinformatics
+  - biopython
+  - rdkit=2020.03.2
+  
+  # Utilities
+  - tqdm
+  - networkx
+  - joblib
+  - ipython
+  
+  # Development tools
+  - jupyter
+  - notebook
+  
+  # Pip packages
+  - pip:
+    # Protein language models
+    - fair-esm==2.0.0
+    
+    # Deep learning utilities  
+    - torch-geometric==1.6.3
+    - torch-cluster
+    - torch-scatter  
+    - torch-sparse
+    - torch-spline-conv
+    
+    # Additional scientific packages
+    - ase==3.21.1
+    - numba==0.53.1
+    - h5py==2.10.0
+    
+    # Utilities
+    - pyyaml
+    - requests
+    - click
