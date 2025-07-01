@@ -1,30 +1,15 @@
-def process_dssp_file(file_path):
-    current_id = None
-    current_features = []
-    total_ids = 0
+# === Count unique protein IDs in test_pred.txt ===
 
-    with open(file_path, "r") as f:
-        for line in f:
-            line = line.strip()
-            if line.startswith("#"):
-                total_ids += 1
-                current_id = line[2:]  # Remove '# ' prefix
-                current_features = []  # Reset for new protein
-            else:
-                current_features.append(line)
+pred_file = "/data/shared/github/lutesAI2025/naufal/test_pred.txt"
 
-    # Print SS/RSA lines for the last protein block
-    print("=== SS/RSA for the LAST protein block ===")
-    for line in current_features:
-        print(line)
+unique_ids = set()
 
-    # Print final summary
-    print("\n=== Summary ===")
-    print(f"Last ID: {current_id}")
-    print(f"Total number of protein IDs: {total_ids}")
+with open(pred_file, "r") as f:
+    for line in f:
+        parts = line.strip().split("\t")
+        if len(parts) != 2:
+            continue
+        pid = parts[0]
+        unique_ids.add(pid)
 
-
-# Example usage
-if __name__ == "__main__":
-    file_path = "/data/summer2020/naufal/features_dssp_direct.txt"
-    process_dssp_file(file_path)
+print(f"[✓] Number of unique protein IDs in test_pred.txt: {len(unique_ids)}")
