@@ -58,6 +58,35 @@ for pid, predicted in pred_annots.items():
     FN_total += fn
 
     prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    rec = tp / (tp + fn) if (tp + fn) > 0 else 0.
+    rec = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    fscore = (2 * prec * rec) / (prec + rec) if (prec + rec) > 0 else 0.0
+    smin = math.sqrt(fp**2 + fn**2)
 
+    all_precisions.append(prec)
+    all_recalls.append(rec)
+    all_fmax.append(fscore)
+    smin_sum += smin
+    valid += 1
+
+# === Estimate TN correctly ===
+num_predicted_proteins = len(pred_annots)
+total_labels = num_predicted_proteins * total_vocab
+TN_total = total_labels - (TP_total + FP_total + FN_total)
+
+# === Report ===
+avg_precision = sum(all_precisions) / valid if valid else 0.0
+avg_recall = sum(all_recalls) / valid if valid else 0.0
+avg_fmax = sum(all_fmax) / valid if valid else 0.0
+avg_smin = smin_sum / valid if valid else 0.0
+
+print(f"\n[Evaluation Metrics]")
+print(f"Precision:  {avg_precision:.4f}")
+print(f"Recall:     {avg_recall:.4f}")
+print(f"Fmax:       {avg_fmax:.4f}")
+print(f"Smin:       {avg_smin:.4f}")
+print(f"\n[Confusion Totals]")
+print(f"TP: {TP_total}")
+print(f"FP: {FP_total}")
+print(f"FN: {FN_total}")
+print(f"TN: {TN_total} (estimated from {num_predicted_proteins} predicted proteins × {total_vocab} GO terms)")
 
