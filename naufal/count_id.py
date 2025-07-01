@@ -1,15 +1,20 @@
-# === Count unique protein IDs in test_pred.txt ===
+# === File path ===
+mapping_file = "/data/summer2020/naufal/matched_ids_with_go.txt"
 
-pred_file = "/data/shared/github/lutesAI2025/naufal/test_pred.txt"
+# === Set to hold unique GO terms ===
+unique_go_terms = set()
 
-unique_ids = set()
-
-with open(pred_file, "r") as f:
+# === Read the file and collect terms ===
+with open(mapping_file, "r") as f:
     for line in f:
         parts = line.strip().split("\t")
         if len(parts) != 2:
             continue
-        pid = parts[0]
-        unique_ids.add(pid)
+        _, terms = parts
+        for term in terms.split(";"):
+            term = term.strip()
+            if term:
+                unique_go_terms.add(term)
 
-print(f"[✓] Number of unique protein IDs in test_pred.txt: {len(unique_ids)}")
+# === Print result ===
+print(f"Total unique GO terms: {len(unique_go_terms)}")
