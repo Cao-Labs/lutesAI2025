@@ -62,22 +62,25 @@ class Struct2GODataProcessor:
 
     def download_goa_file(self, organism="uniprot"):
         """Download GOA file if not provided"""
-        base_url = "ftp://ftp.ebi.ac.uk/pub/databases/GO/goa/UNIPROT/"
+        base_url = "http://ftp.ebi.ac.uk/pub/databases/GO/goa/"
         
         if organism == "human":
-            filename = "gene_association.goa_human.gz"
+            filename = "goa_human.gaf.gz"
+            url = base_url + "HUMAN/" + filename
         elif organism == "uniprot":
-            filename = "gene_association.goa_uniprot.gz"
+            filename = "goa_uniprot_all.gaf.gz"
+            url = base_url + "UNIPROT/" + filename
         else:
-            filename = f"gene_association.goa_{organism}.gz"
+            filename = f"goa_{organism}.gaf.gz"
+            url = base_url + f"{organism.upper()}/" + filename
             
-        url = base_url + filename
         local_path = self.output_dir / filename
         
         if not local_path.exists():
             print(f"Downloading {filename}...")
             try:
-                response = requests.get(url.replace('ftp://', 'http://'))
+                response = requests.get(url)
+                response.raise_for_status()  # Raise an exception for bad status codes
                 with open(local_path, 'wb') as f:
                     f.write(response.content)
                 print(f"Downloaded {filename}")
@@ -86,6 +89,23 @@ class Struct2GODataProcessor:
                 return None
         
         return local_path
+
+    def find_gaf_file(self):
+        """Find any GAF file in the output directory"""
+        # Look for common GAF file patterns
+        gaf_patterns = [
+            "*.gaf.gz", "*.gaf", 
+            "gene_association.*.gz", "gene_association.*",
+            "goa_*.gz", "goa_*"
+        ]
+        
+        for pattern in gaf_patterns:
+            files = list(self.output_dir.glob(pattern))
+            if files:
+                print(f"Found GAF file: {files[0]}")
+                return files[0]
+        
+        return None
 
     def parse_obo_file(self):
         """Parse GO OBO file to extract term information"""
@@ -122,43 +142,81 @@ class Struct2GODataProcessor:
     def parse_gaf_file(self):
         """Parse GAF file to extract protein-GO associations"""
         if not self.gaf_file or not self.gaf_file.exists():
-            print("No GAF file provided, downloading default...")
-            self.gaf_file = self.download_goa_file("uniprot")
+            print("No GAF file provided, looking for downloaded files...")
+            self.gaf_file = self.find_gaf_file()
+            
+            if not self.gaf_file:
+                print("No GAF file found, downloading default...")
+                self.gaf_file = self.download_goa_file("uniprot")
             
         if not self.gaf_file:
             print("Could not obtain GAF file, skipping GO annotations")
             return
             
-        print("Parsing GAF file...")
+        print(f"Parsing GAF file: {self.gaf_file}")
         
-        if self.gaf_file.suffix == '.gz':
+        # Smart file opening - try gzip first, then regular file
+        try:
+            # Test if it's actually gzipped
+            with gzip.open(self.gaf_file, 'rt') as test_file:
+                test_file.readline()
             opener = gzip.open
-        else:
+            mode = 'rt'
+            print("File detected as gzipped")
+        except (gzip.BadGzipFile, OSError, UnicodeDecodeError):
+            # If not gzipped, treat as regular file
             opener = open
+            mode = 'r'
+            print("File detected as regular text")
             
         protein_annotations = defaultdict(set)
+        line_count = 0
+        annotation_count = 0
         
-        with opener(self.gaf_file, 'rt') as f:
-            for line in f:
-                if line.startswith('!'):  # Skip comment lines
-                    continue
+        try:
+            with opener(self.gaf_file, mode) as f:
+                for line in f:
+                    line_count += 1
                     
-                fields = line.strip().split('\t')
-                if len(fields) < 17:
-                    continue
+                    # Skip comment lines
+                    if line.startswith('!'):
+                        continue
                     
-                db = fields[0]
-                protein_id = fields[1]
-                go_term = fields[4]
-                evidence_code = fields[6]
-                
-                # Only include certain evidence codes (exclude IEA for higher quality)
-                # You can modify this based on your needs
-                if evidence_code not in ['IEA']:  # Exclude electronic annotations
-                    protein_annotations[protein_id].add(go_term)
+                    # Skip empty lines
+                    if not line.strip():
+                        continue
+                        
+                    fields = line.strip().split('\t')
+                    if len(fields) < 15:  # GAF format requires at least 15 fields
+                        continue
+                        
+                    try:
+                        db = fields[0]
+                        protein_id = fields[1]
+                        go_term = fields[4]
+                        evidence_code = fields[6]
+                        
+                        # Only include certain evidence codes (exclude IEA for higher quality)
+                        # You can modify this based on your needs
+                        if evidence_code not in ['IEA']:  # Exclude electronic annotations
+                            protein_annotations[protein_id].add(go_term)
+                            annotation_count += 1
+                            
+                    except (IndexError, ValueError) as e:
+                        continue  # Skip malformed lines
+                        
+                    # Progress indicator for large files
+                    if line_count % 100000 == 0:
+                        print(f"Processed {line_count} lines, found {annotation_count} annotations...")
+        
+        except Exception as e:
+            print(f"Error parsing GAF file: {e}")
+            print("Continuing without GO annotations...")
+            return
         
         self.protein_go_annotations = protein_annotations
         print(f"Parsed annotations for {len(protein_annotations)} proteins")
+        print(f"Total annotations: {annotation_count}")
 
     def create_go_label_matrix(self, protein_list, go_terms_subset=None, namespace_filter=None):
         """Create binary label matrix for GO terms"""
@@ -202,7 +260,7 @@ class Struct2GODataProcessor:
         print(f"Created label matrix with {len(term_list)} GO terms")
         
         # Save term mapping
-        with open(self.output_dir / 'go_term_mapping.pkl', 'wb') as f:
+        with open(self.output_dir / f'go_term_mapping_{namespace_filter or "all"}.pkl', 'wb') as f:
             pickle.dump({
                 'term_to_idx': term_to_idx,
                 'idx_to_term': {idx: term for term, idx in term_to_idx.items()},
@@ -442,7 +500,9 @@ class Struct2GODataProcessor:
         print("- protein_labels_mf.pkl: Molecular function GO labels")
         print("- protein_labels_bp.pkl: Biological process GO labels") 
         print("- protein_labels_cc.pkl: Cellular component GO labels")
-        print("- go_term_mapping.pkl: GO term index mappings")
+        print("- go_term_mapping_molecular_function.pkl: MF GO term index mappings")
+        print("- go_term_mapping_biological_process.pkl: BP GO term index mappings")
+        print("- go_term_mapping_cellular_component.pkl: CC GO term index mappings")
 
     def create_dataset_file(self, protein_graphs, protein_node_features, protein_labels, branch='mf'):
         """Create dataset file compatible with Struct2GO MyDataSet class"""
