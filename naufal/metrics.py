@@ -46,11 +46,17 @@ def get_ancestors(term, graph):
 def load_annotations(path):
     annotations = {}
     with open(path) as f:
-        for line in f:
-            if "\t" not in line:
+        for line_num, line in enumerate(f, 1):
+            line = line.strip()
+            if not line or "\t" not in line:
+                print(f"[WARN] Skipping malformed line {line_num}: {line}")
                 continue
-            pid, terms = line.strip().split("\t")
-            annotations[pid] = set(t for t in terms.split(";") if t)
+            try:
+                pid, terms = line.split("\t", 1)
+                annotations[pid] = set(t for t in terms.split(";") if t)
+            except ValueError:
+                print(f"[WARN] Could not parse line {line_num}: {line}")
+                continue
     return annotations
 
 # === Step 5: Evaluate semantic-aware precision/recall/F1/Smin ===
@@ -124,6 +130,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
