@@ -17,6 +17,7 @@ pdb_files = sorted(input_dir.glob("*.pdb"))
 for i, pdb_file in enumerate(pdb_files, 1):
     output_file = output_dir / f"{pdb_file.stem}_goboost.txt"
     print(f"[{i}/{len(pdb_files)}] Processing {pdb_file.name}...")
+    print(f"Running: {cmd}")
 
     cmd = (
         f"python /data/shared/tools/GOBoost/Predictor.py "
