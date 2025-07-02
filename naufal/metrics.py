@@ -113,7 +113,7 @@ def evaluate(pred, true, graph, depths):
 
 # === Entry point ===
 def main():
-    pred_file = "test_pred.txt"  # Format: <ID>\t<GO1;GO2;GO3>
+    pred_file = "test_pred2.txt"  # Format: <ID>\t<GO1;GO2;GO3>
     true_file = "/data/summer2020/naufal/matched_ids_with_go.txt"
     obo_file = "/data/shared/databases/UniProt2025/GO_June_1_2025.obo"
 
