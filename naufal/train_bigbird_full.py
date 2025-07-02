@@ -113,8 +113,8 @@ def train():
     obo_path = "/data/shared/databases/UniProt2025/GO_June_1_2025.obo"
     embedding_dir = "/data/summer2020/naufal/final_embeddings_pca"
     go_mapping_file = "/data/summer2020/naufal/matched_ids_with_go.txt"
-    vocab_output_path = "/data/shared/github/lutesAI2025/naufal/go_vocab.json"
-    model_output_path = "/data/shared/github/lutesAI2025/naufal/bigbird_finetuned.pt"
+    vocab_output_path = "/data/shared/github/lutesAI2025/naufal/go_vocab_full.json"
+    model_output_path = "/data/shared/github/lutesAI2025/naufal/bigbird_finetuned_full.pt"
 
     print("[INFO] Parsing GO DAG...")
     go_graph = extract_go_graph(obo_path)
