@@ -111,7 +111,7 @@ def train():
 
     # === Paths ===
     obo_path = "/data/shared/databases/UniProt2025/GO_June_1_2025.obo"
-    embedding_dir = "/data/summer2020/naufal/final_embeddings_pca"
+    embedding_dir = "/data/summer2020/naufal/esm3_embeddings_new"
     go_mapping_file = "/data/summer2020/naufal/matched_ids_with_go.txt"
     vocab_output_path = "/data/shared/github/lutesAI2025/naufal/go_vocab_full.json"
     model_output_path = "/data/shared/github/lutesAI2025/naufal/bigbird_finetuned_full.pt"
