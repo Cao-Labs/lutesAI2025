@@ -24,7 +24,7 @@ for i, pdb_file in enumerate(pdb_files, 1):
         f"--sub_function {sub_function} "
         f"--config-file {config_file} "
         f"--pdb {pdb_file} "
-        f"--prob {prob_threshold} > {output_file}"
+        f"--prob {prob_threshold}"
     )
 
     os.system(cmd)
