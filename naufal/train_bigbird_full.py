@@ -104,7 +104,7 @@ class BigBirdProteinModel(nn.Module):
 # === Training Loop with AMP ===
 def train():
     device = torch.device("cuda:1" if torch.cuda.device_count() > 1 else "cuda:0")
-    batch_size = 16
+    batch_size = 4
     epochs = 5
     learning_rate = 1e-5
     min_lr = 1e-7
