@@ -9,7 +9,7 @@ import numpy as np
 import gym
 import time
 import datetime
-from go_env import GOEnv, proteins, all_go_terms, protein_data_for_env  # You wrote this already
+from go_env import GOEnv, proteins, all_go_terms, protein_data_for_env # You wrote this already
 from Graph_Log import graphit
 whenRan = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
 
@@ -62,12 +62,12 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
     if not os.path.exists(eval_log_path):
         with open(eval_log_path, mode='w', newline='', encoding='utf-8-sig') as f:
             writer = csv.writer(f)
-            writer.writerow(['episode', 'avg_reward', 'time'])
+            writer.writerow(['episode', 'avg_reward', 'avg_percent_correct', 'time'])
 
     if not os.path.exists(training_log_path):
         with open(training_log_path, mode='w', newline='', encoding='utf-8-sig') as f:
             writer = csv.writer(f)
-            writer.writerow(['episode', 'reward', 'selected_amount', 'time'])
+            writer.writerow(['episode', 'reward', 'selected_amount', 'percent_correct', 'time'])
 
     for episode in range(episodes):
         obs = env.reset()
@@ -80,7 +80,8 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
 
         action_np = action.detach().cpu().numpy().astype(np.int8)  # send back to CPU for env
         num_selected_terms = int(np.sum(action_np))  # Total GO terms selected
-        _, reward, _, _ = env.step(action_np)
+        _, reward, _, info = env.step(action_np)
+        percent_correct = info.get("percent_correct", 0.0)
 
         # Update running stats
         reward_sum += reward
@@ -105,7 +106,7 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
 
         with open(os.path.join(SAVE_DIR,whenRan,training_log), mode='a', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow([episode, reward, num_selected_terms,time.time() - startTime])
+            writer.writerow([episode, reward, num_selected_terms,percent_correct.time.time() - startTime])
         if episode > 0 and episode % Reset_Interval == 0:
             reward_sum = 0.0
             reward_sq_sum = 0.0
@@ -115,7 +116,7 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
         if episode % 250 == 0:
             print(
                 f"\n🎯 Episode {episode}: Reward = {reward:.2f}, Normalized Reward = {normalized_reward:.3f}, Baseline = {baseline:.3f}")
-            avg_reward, best_avg_reward = evaluate(policy, env, episodes=10, episode_idx=episode,
+            avg_reward, best_avg_reward, avg_percent = evaluate(policy, env, episodes=10, episode_idx=episode,
                                                    best_avg_reward=best_avg_reward)
             checkpoint_path = os.path.join(CHECKPOINT_DIR, f"model_episode_{episode}.pt")
             torch.save(policy.state_dict(), checkpoint_path)
@@ -123,12 +124,12 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
 
             with open(os.path.join(SAVE_DIR,whenRan,eval_log), mode='a', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow([episode, avg_reward,time.time() - startTime])
-
+                writer.writerow([episode, avg_reward, avg_percent, time.time() - startTime])
 
 def evaluate(policy, env, episodes=20, episode_idx=0, best_avg_reward=None):
     policy.eval()
     total_reward = 0
+    total_percent = 0
     with torch.no_grad():
         for _ in range(episodes):
             obs = env.reset()
@@ -136,10 +137,12 @@ def evaluate(policy, env, episodes=20, episode_idx=0, best_avg_reward=None):
             probs = policy(sequence).squeeze(0)
 
             action = (probs > 0.5).int().cpu().numpy().astype(np.int8)
-            _, reward, _, _ = env.step(action)
+            _, reward, _, info = env.step(action)
+            percent_correct = info.get("percent_correct", 0.0)
+            total_percent += percent_correct
             total_reward += reward
 
-
+    avg_percent = total_percent / episodes
     avg_reward = total_reward / episodes
     print(f"✅ Evaluation at Episode {episode_idx}: Avg Reward = {avg_reward:.2f}")
 
@@ -152,7 +155,7 @@ def evaluate(policy, env, episodes=20, episode_idx=0, best_avg_reward=None):
 
     policy.train()
 
-    return avg_reward, best_avg_reward  # ✅ Always return both
+    return avg_reward, best_avg_reward,avg_percent  # ✅ Always return both
 
 # --------- 3. Run Everything ---------
 if __name__ == "__main__":
