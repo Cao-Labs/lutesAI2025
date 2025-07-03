@@ -8,7 +8,7 @@ variant_placeholder = "A3V"  # Dummy variant for now
 temp_dir = "/data/shared/github/lutesAI2025/Sanjina/temp/"
 output_dir = "/data/summer2020/Sanjina/thplm_outputs/"
 extract_script = "/data/shared/tools/THPLM/esmcripts/extract.py"
-thplm_script = "/data/shared/tools/THPLM/THPLM_Predict.py"
+thplm_script = "/data/shared/tools/THPLM/THPLM_predict.py"
 
 # Create temp and output dirs
 os.makedirs(temp_dir, exist_ok=True)
