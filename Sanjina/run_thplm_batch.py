@@ -57,7 +57,7 @@ with open(input_fasta) as handle:
             "--gpunumber", "0",
             "--extractfile", extract_script
         ]
-        subprocess.run(cmd)
+        subprocess.run(cmd, check=True)
 
         # 6. Clean up temp files
         for f in [variant_file, wt_fasta, variant_fasta]:
