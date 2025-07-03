@@ -141,7 +141,7 @@ def evaluate(policy, env, episodes=20, episode_idx=0, best_avg_reward=None):
 
     # Save best model
     if best_avg_reward is None or avg_reward > best_avg_reward:
-        path = os.path.join(os.path.join(SAVE_DIR, whenRan,BEST_MODEL_DIR), f"best_model_episode_{episode_idx}.pt")
+        path = os.path.join(os.path.join(BEST_MODEL_DIR), f"best_model_episode_{episode_idx}.pt")
         torch.save(policy.state_dict(), path)
         print(f"💾 Saved best model to {path}")
         best_avg_reward = avg_reward
@@ -156,6 +156,6 @@ if __name__ == "__main__":
     policy = PolicyNetwork(input_size=512, output_size=env.max_choices).to(device)
     optimizer = optim.Adam(policy.parameters(), lr=1e-4)
 
-    train(env, policy, optimizer, episodes=125000)
+    train(env, policy, optimizer, episodes=75000)
 
     graphit(os.path.join(SAVE_DIR,whenRan,'training_log_test.csv'), os.path.join(SAVE_DIR,whenRan,'eval_log.csv'),os.path.join(SAVE_DIR,whenRan,"graph"))
