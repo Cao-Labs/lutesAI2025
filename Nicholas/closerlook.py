@@ -20,7 +20,10 @@ def plot_csv_graph(csv_path, x_col, y_col, num_points=None, title="Graph", save_
     path = input()
     print("How many points to plot?")
     num_points = int(input())
-    df = pd.read_csv(csv_path)
+
+    # Correct way to build the path
+    full_path = os.path.join("saved_models", csv_path, "training_log_test.csv")
+    df = pd.read_csv(full_path)
 
     # Sample points if num_points is specified and less than total
     if num_points is not None and num_points < len(df):
