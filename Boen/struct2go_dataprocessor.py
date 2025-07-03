@@ -226,26 +226,28 @@ class Struct2GOProcessor:
                     protein_id = pdb_file.stem.replace('.pdb', '')
                 
                 # Load using original load_cmap function
-                A, S_original, pdb_seq = self.load_cmap(pdb_path, self.cmap_thresh)
+                A, S_original, seq = self.load_cmap(pdb_path, self.cmap_thresh)
                 
-                if A is None or len(pdb_seq) == 0:
+                if A is None or len(seq) == 0:
                     continue
                 
                 # Use FASTA sequence if available, otherwise use PDB sequence
                 if protein_id in fasta_sequences:
                     final_seq = fasta_sequences[protein_id]
-                    print(f"Using FASTA sequence for {protein_id} (length: {len(final_seq)})")
+                    # Ensure sequence and structure match in length
+                    if len(final_seq) != A.shape[1]:
+                        min_len = min(len(final_seq), A.shape[1])
+                        final_seq = final_seq[:min_len]
+                        A = A[:, :min_len, :min_len]
                 else:
-                    final_seq = pdb_seq
-                    print(f"Using PDB sequence for {protein_id} (length: {len(final_seq)})")
+                    final_seq = seq
                 
-                # Ensure sequence and structure match in length
-                if len(final_seq) != A.shape[1]:
-                    print(f"Length mismatch for {protein_id}: seq={len(final_seq)}, struct={A.shape[1]}")
-                    # Use the shorter length
-                    min_len = min(len(final_seq), A.shape[1])
-                    final_seq = final_seq[:min_len]
-                    A = A[:, :min_len, :min_len]
+                # Create 56-dimensional node features (for graph nodes)
+                distances_2d = A.squeeze(0)  # Remove batch dimension
+                node_features_56 = self.create_56_dim_features(final_seq, distances_2d)
+                
+                # Create 1024-dimensional sequence features (for sequence input)
+                sequence_features_1024 = self.create_1024_sequence_features(final_seq)
                 
                 # Create 56-dimensional node features (for graph nodes)
                 distances_2d = A.squeeze(0)  # Remove batch dimension
@@ -272,7 +274,7 @@ class Struct2GOProcessor:
                     g = dgl.add_self_loop(g)
                 else:
                     # Create self-loop only graph
-                    n_nodes = len(seq)
+                    n_nodes = len(final_seq)
                     g = dgl.graph((list(range(n_nodes)), list(range(n_nodes))))
                 
                 # Add node features to graph (56-dimensional)
@@ -282,7 +284,7 @@ class Struct2GOProcessor:
                 protein_graphs[protein_id] = g
                 protein_node_features[protein_id] = torch.tensor(node_features_56, dtype=torch.float32)
                 protein_sequence_features[protein_id] = torch.tensor(sequence_features_1024, dtype=torch.float32)
-                protein_sequences[protein_id] = seq
+                protein_sequences[protein_id] = final_seq
                 protein_contact_maps[protein_id] = A.squeeze(0)
                 
                 processed_count += 1
