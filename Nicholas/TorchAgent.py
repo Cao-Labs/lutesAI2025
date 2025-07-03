@@ -106,7 +106,7 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
 
         with open(os.path.join(SAVE_DIR,whenRan,training_log), mode='a', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow([episode, reward, num_selected_terms,percent_correct.time.time() - startTime])
+            writer.writerow([episode, reward, num_selected_terms,percent_correct,time.time() - startTime])
         if episode > 0 and episode % Reset_Interval == 0:
             reward_sum = 0.0
             reward_sq_sum = 0.0
