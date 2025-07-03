@@ -65,4 +65,4 @@ with open(input_fasta) as handle:
 
 print("✅ All sequences processed.")
 
-Switched to test input fasta for small batch test
+
