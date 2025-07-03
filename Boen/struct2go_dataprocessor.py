@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-Data processor for Struct2GO
-Converts FASTA sequences and PDB structures into the required pickle format
-Processes GO annotations from OBO and GAF files
+Modified Data processor for Struct2GO
+Loads FASTA sequences and PDB structures first, then optionally processes GO annotations
 """
 
 import os
@@ -60,215 +59,57 @@ class Struct2GODataProcessor:
         for _, val in self.vocab_embed.items():
             self.vocab_one_hot[val, val] = 1
 
-    def download_goa_file(self, organism="uniprot"):
-        """Download GOA file if not provided"""
-        base_url = "http://ftp.ebi.ac.uk/pub/databases/GO/goa/"
+    def process_structures_only(self):
+        """Process only FASTA and PDB data without GO annotations"""
+        print("Processing structures and sequences only...")
         
-        if organism == "human":
-            filename = "goa_human.gaf.gz"
-            url = base_url + "HUMAN/" + filename
-        elif organism == "uniprot":
-            filename = "goa_uniprot_all.gaf.gz"
-            url = base_url + "UNIPROT/" + filename
-        else:
-            filename = f"goa_{organism}.gaf.gz"
-            url = base_url + f"{organism.upper()}/" + filename
-            
-        local_path = self.output_dir / filename
+        # Load sequences
+        sequences = self.load_fasta_sequences()
         
-        if not local_path.exists():
-            print(f"Downloading {filename}...")
+        # Process PDB files
+        protein_graphs, protein_sequences, protein_node_features, protein_contact_maps = self.process_pdb_files(sequences)
+        
+        # Save structural data
+        self.save_structural_data(protein_graphs, protein_sequences, protein_node_features, protein_contact_maps)
+        
+        return protein_graphs, protein_sequences, protein_node_features, protein_contact_maps
+
+    def process_with_annotations(self, protein_graphs=None, protein_sequences=None, protein_node_features=None, protein_contact_maps=None):
+        """Process GO annotations and create labeled datasets"""
+        print("Processing GO annotations...")
+        
+        # If no structural data provided, load from files
+        if protein_graphs is None:
+            print("Loading previously processed structural data...")
             try:
-                response = requests.get(url)
-                response.raise_for_status()  # Raise an exception for bad status codes
-                with open(local_path, 'wb') as f:
-                    f.write(response.content)
-                print(f"Downloaded {filename}")
-            except Exception as e:
-                print(f"Failed to download {filename}: {e}")
-                return None
+                with open(self.output_dir / 'protein_graphs.pkl', 'rb') as f:
+                    protein_graphs = pickle.load(f)
+                with open(self.output_dir / 'protein_sequences.pkl', 'rb') as f:
+                    protein_sequences = pickle.load(f)
+                with open(self.output_dir / 'protein_node_features.pkl', 'rb') as f:
+                    protein_node_features = pickle.load(f)
+                with open(self.output_dir / 'protein_contact_maps.pkl', 'rb') as f:
+                    protein_contact_maps = pickle.load(f)
+            except FileNotFoundError:
+                print("No structural data found. Run process_structures_only() first.")
+                return None, None, None, None
         
-        return local_path
-
-    def find_gaf_file(self):
-        """Find any GAF file in the output directory"""
-        # Look for common GAF file patterns
-        gaf_patterns = [
-            "*.gaf.gz", "*.gaf", 
-            "gene_association.*.gz", "gene_association.*",
-            "goa_*.gz", "goa_*"
-        ]
-        
-        for pattern in gaf_patterns:
-            files = list(self.output_dir.glob(pattern))
-            if files:
-                print(f"Found GAF file: {files[0]}")
-                return files[0]
-        
-        return None
-
-    def parse_obo_file(self):
-        """Parse GO OBO file to extract term information"""
-        if not self.obo_file or not self.obo_file.exists():
-            print("No OBO file provided, skipping GO term parsing")
-            return
-            
-        print("Parsing GO OBO file...")
-        current_term = None
-        
-        with open(self.obo_file, 'r') as f:
-            for line in f:
-                line = line.strip()
-                
-                if line == "[Term]":
-                    current_term = {}
-                elif line.startswith("id: "):
-                    if current_term is not None:
-                        current_term['id'] = line[4:]
-                elif line.startswith("name: "):
-                    if current_term is not None:
-                        current_term['name'] = line[6:]
-                elif line.startswith("namespace: "):
-                    if current_term is not None:
-                        current_term['namespace'] = line[11:]
-                elif line == "" and current_term is not None:
-                    # End of term
-                    if 'id' in current_term:
-                        self.go_terms[current_term['id']] = current_term
-                    current_term = None
-        
-        print(f"Parsed {len(self.go_terms)} GO terms")
-
-    def parse_gaf_file(self):
-        """Parse GAF file to extract protein-GO associations"""
-        if not self.gaf_file or not self.gaf_file.exists():
-            print("No GAF file provided, looking for downloaded files...")
-            self.gaf_file = self.find_gaf_file()
-            
+        # Parse GO data with protein filtering for speed
+        if self.obo_file:
+            self.parse_obo_file()
+        if self.gaf_file or True:  # Always try to get GAF data
+            # Filter to only proteins we have structures for
+            protein_filter = set(protein_graphs.keys())
+            # Use organism preference if set
+            organism = getattr(self, 'organism', 'human')
             if not self.gaf_file:
-                print("No GAF file found, downloading default...")
-                self.gaf_file = self.download_goa_file("uniprot")
-            
-        if not self.gaf_file:
-            print("Could not obtain GAF file, skipping GO annotations")
-            return
-            
-        print(f"Parsing GAF file: {self.gaf_file}")
+                self.gaf_file = self.download_goa_file(organism)
+            self.parse_gaf_file(protein_filter=protein_filter)
         
-        # Smart file opening - try gzip first, then regular file
-        try:
-            # Test if it's actually gzipped
-            with gzip.open(self.gaf_file, 'rt') as test_file:
-                test_file.readline()
-            opener = gzip.open
-            mode = 'rt'
-            print("File detected as gzipped")
-        except (gzip.BadGzipFile, OSError, UnicodeDecodeError):
-            # If not gzipped, treat as regular file
-            opener = open
-            mode = 'r'
-            print("File detected as regular text")
-            
-        protein_annotations = defaultdict(set)
-        line_count = 0
-        annotation_count = 0
+        # Create GO labels and dataset files
+        self.create_go_datasets(protein_graphs, protein_node_features)
         
-        try:
-            with opener(self.gaf_file, mode) as f:
-                for line in f:
-                    line_count += 1
-                    
-                    # Skip comment lines
-                    if line.startswith('!'):
-                        continue
-                    
-                    # Skip empty lines
-                    if not line.strip():
-                        continue
-                        
-                    fields = line.strip().split('\t')
-                    if len(fields) < 15:  # GAF format requires at least 15 fields
-                        continue
-                        
-                    try:
-                        db = fields[0]
-                        protein_id = fields[1]
-                        go_term = fields[4]
-                        evidence_code = fields[6]
-                        
-                        # Only include certain evidence codes (exclude IEA for higher quality)
-                        # You can modify this based on your needs
-                        if evidence_code not in ['IEA']:  # Exclude electronic annotations
-                            protein_annotations[protein_id].add(go_term)
-                            annotation_count += 1
-                            
-                    except (IndexError, ValueError) as e:
-                        continue  # Skip malformed lines
-                        
-                    # Progress indicator for large files
-                    if line_count % 100000 == 0:
-                        print(f"Processed {line_count} lines, found {annotation_count} annotations...")
-        
-        except Exception as e:
-            print(f"Error parsing GAF file: {e}")
-            print("Continuing without GO annotations...")
-            return
-        
-        self.protein_go_annotations = protein_annotations
-        print(f"Parsed annotations for {len(protein_annotations)} proteins")
-        print(f"Total annotations: {annotation_count}")
-
-    def create_go_label_matrix(self, protein_list, go_terms_subset=None, namespace_filter=None):
-        """Create binary label matrix for GO terms"""
-        if not self.go_terms or not self.protein_go_annotations:
-            print("No GO data available, creating dummy labels")
-            return {protein_id: torch.zeros(273) for protein_id in protein_list}
-        
-        # Filter GO terms if needed
-        if namespace_filter:
-            filtered_terms = {
-                term_id: term_data for term_id, term_data in self.go_terms.items()
-                if term_data.get('namespace') == namespace_filter
-            }
-        else:
-            filtered_terms = self.go_terms
-            
-        if go_terms_subset:
-            filtered_terms = {
-                term_id: term_data for term_id, term_data in filtered_terms.items()
-                if term_id in go_terms_subset
-            }
-        
-        # Create term index mapping
-        term_list = sorted(filtered_terms.keys())
-        term_to_idx = {term: idx for idx, term in enumerate(term_list)}
-        
-        # Create label matrix
-        protein_labels = {}
-        for protein_id in protein_list:
-            labels = torch.zeros(len(term_list))
-            
-            # Get annotations for this protein
-            protein_terms = self.protein_go_annotations.get(protein_id, set())
-            
-            for term in protein_terms:
-                if term in term_to_idx:
-                    labels[term_to_idx[term]] = 1
-                    
-            protein_labels[protein_id] = labels
-        
-        print(f"Created label matrix with {len(term_list)} GO terms")
-        
-        # Save term mapping
-        with open(self.output_dir / f'go_term_mapping_{namespace_filter or "all"}.pkl', 'wb') as f:
-            pickle.dump({
-                'term_to_idx': term_to_idx,
-                'idx_to_term': {idx: term for term, idx in term_to_idx.items()},
-                'term_list': term_list,
-                'namespace_filter': namespace_filter
-            }, f)
-        
-        return protein_labels
+        return protein_graphs, protein_sequences, protein_node_features, protein_contact_maps
 
     def seq2onehot(self, seq):
         """Convert amino acid sequence to one-hot encoding"""
@@ -379,17 +220,8 @@ class Struct2GODataProcessor:
         
         return contact_map, graph
 
-    def process_all_data(self):
-        """Process all FASTA and PDB data"""
-        # Parse GO data if available
-        if self.obo_file:
-            self.parse_obo_file()
-        if self.gaf_file or True:  # Always try to get GAF data
-            self.parse_gaf_file()
-        
-        # Load sequences
-        sequences = self.load_fasta_sequences()
-        
+    def process_pdb_files(self, sequences):
+        """Process PDB files and create graphs"""
         # Initialize data containers
         protein_graphs = {}
         protein_sequences = {}
@@ -445,8 +277,8 @@ class Struct2GODataProcessor:
         
         return protein_graphs, protein_sequences, protein_node_features, protein_contact_maps
 
-    def save_processed_data(self, protein_graphs, protein_sequences, protein_node_features, protein_contact_maps):
-        """Save processed data to pickle files"""
+    def save_structural_data(self, protein_graphs, protein_sequences, protein_node_features, protein_contact_maps):
+        """Save structural data only"""
         
         # Save individual components
         with open(self.output_dir / 'protein_graphs.pkl', 'wb') as f:
@@ -461,29 +293,226 @@ class Struct2GODataProcessor:
         with open(self.output_dir / 'protein_contact_maps.pkl', 'wb') as f:
             pickle.dump(protein_contact_maps, f)
         
-        # Create GO labels
+        print(f"Saved structural data to {self.output_dir}")
+        print("Files created:")
+        print("- protein_graphs.pkl: DGL graphs for each protein")
+        print("- protein_sequences.pkl: Amino acid sequences")
+        print("- protein_node_features.pkl: One-hot encoded sequence features")
+        print("- protein_contact_maps.pkl: Contact maps")
+
+    # ... [Include all the GO processing methods from original code] ...
+    
+    def download_goa_file(self, organism="human"):  # Changed default to human
+        """Download GOA file if not provided"""
+        base_url = "http://ftp.ebi.ac.uk/pub/databases/GO/goa/"
+        
+        if organism == "human":
+            filename = "goa_human.gaf.gz"
+            url = base_url + "HUMAN/" + filename
+        elif organism == "uniprot":
+            filename = "goa_uniprot_all.gaf.gz"
+            url = base_url + "UNIPROT/" + filename
+        else:
+            filename = f"goa_{organism}.gaf.gz"
+            url = base_url + f"{organism.upper()}/" + filename
+            
+        local_path = self.output_dir / filename
+        
+        if not local_path.exists():
+            print(f"Downloading {filename}...")
+            try:
+                response = requests.get(url)
+                response.raise_for_status()
+                with open(local_path, 'wb') as f:
+                    f.write(response.content)
+                print(f"Downloaded {filename}")
+            except Exception as e:
+                print(f"Failed to download {filename}: {e}")
+                return None
+        
+        return local_path
+
+    def find_gaf_file(self):
+        """Find any GAF file in the output directory"""
+        gaf_patterns = [
+            "*.gaf.gz", "*.gaf", 
+            "gene_association.*.gz", "gene_association.*",
+            "goa_*.gz", "goa_*"
+        ]
+        
+        for pattern in gaf_patterns:
+            files = list(self.output_dir.glob(pattern))
+            if files:
+                print(f"Found GAF file: {files[0]}")
+                return files[0]
+        
+        return None
+
+    def parse_obo_file(self):
+        """Parse GO OBO file to extract term information"""
+        if not self.obo_file or not self.obo_file.exists():
+            print("No OBO file provided, skipping GO term parsing")
+            return
+            
+        print("Parsing GO OBO file...")
+        current_term = None
+        
+        with open(self.obo_file, 'r') as f:
+            for line in f:
+                line = line.strip()
+                
+                if line == "[Term]":
+                    current_term = {}
+                elif line.startswith("id: "):
+                    if current_term is not None:
+                        current_term['id'] = line[4:]
+                elif line.startswith("name: "):
+                    if current_term is not None:
+                        current_term['name'] = line[6:]
+                elif line.startswith("namespace: "):
+                    if current_term is not None:
+                        current_term['namespace'] = line[11:]
+                elif line == "" and current_term is not None:
+                    # End of term
+                    if 'id' in current_term:
+                        self.go_terms[current_term['id']] = current_term
+                    current_term = None
+        
+        print(f"Parsed {len(self.go_terms)} GO terms")
+
+    def parse_gaf_file(self):
+        """Parse GAF file to extract protein-GO associations"""
+        if not self.gaf_file or not self.gaf_file.exists():
+            print("No GAF file provided, looking for downloaded files...")
+            self.gaf_file = self.find_gaf_file()
+            
+            if not self.gaf_file:
+                print("No GAF file found, downloading default...")
+                self.gaf_file = self.download_goa_file("uniprot")
+            
+        if not self.gaf_file:
+            print("Could not obtain GAF file, skipping GO annotations")
+            return
+            
+        print(f"Parsing GAF file: {self.gaf_file}")
+        
+        # Smart file opening - try gzip first, then regular file
+        try:
+            with gzip.open(self.gaf_file, 'rt') as test_file:
+                test_file.readline()
+            opener = gzip.open
+            mode = 'rt'
+            print("File detected as gzipped")
+        except (gzip.BadGzipFile, OSError, UnicodeDecodeError):
+            opener = open
+            mode = 'r'
+            print("File detected as regular text")
+            
+        protein_annotations = defaultdict(set)
+        line_count = 0
+        annotation_count = 0
+        
+        try:
+            with opener(self.gaf_file, mode) as f:
+                for line in f:
+                    line_count += 1
+                    
+                    if line.startswith('!'):
+                        continue
+                    
+                    if not line.strip():
+                        continue
+                        
+                    fields = line.strip().split('\t')
+                    if len(fields) < 15:
+                        continue
+                        
+                    try:
+                        db = fields[0]
+                        protein_id = fields[1]
+                        go_term = fields[4]
+                        evidence_code = fields[6]
+                        
+                        if evidence_code not in ['IEA']:
+                            protein_annotations[protein_id].add(go_term)
+                            annotation_count += 1
+                            
+                    except (IndexError, ValueError) as e:
+                        continue
+                        
+                    if line_count % 100000 == 0:
+                        print(f"Processed {line_count} lines, found {annotation_count} annotations...")
+        
+        except Exception as e:
+            print(f"Error parsing GAF file: {e}")
+            print("Continuing without GO annotations...")
+            return
+        
+        self.protein_go_annotations = protein_annotations
+        print(f"Parsed annotations for {len(protein_annotations)} proteins")
+        print(f"Total annotations: {annotation_count}")
+
+    def create_go_label_matrix(self, protein_list, go_terms_subset=None, namespace_filter=None):
+        """Create binary label matrix for GO terms"""
+        if not self.go_terms or not self.protein_go_annotations:
+            print("No GO data available, creating dummy labels")
+            return {protein_id: torch.zeros(273) for protein_id in protein_list}
+        
+        # Filter GO terms if needed
+        if namespace_filter:
+            filtered_terms = {
+                term_id: term_data for term_id, term_data in self.go_terms.items()
+                if term_data.get('namespace') == namespace_filter
+            }
+        else:
+            filtered_terms = self.go_terms
+            
+        if go_terms_subset:
+            filtered_terms = {
+                term_id: term_data for term_id, term_data in filtered_terms.items()
+                if term_id in go_terms_subset
+            }
+        
+        # Create term index mapping
+        term_list = sorted(filtered_terms.keys())
+        term_to_idx = {term: idx for idx, term in enumerate(term_list)}
+        
+        # Create label matrix
+        protein_labels = {}
+        for protein_id in protein_list:
+            labels = torch.zeros(len(term_list))
+            
+            protein_terms = self.protein_go_annotations.get(protein_id, set())
+            
+            for term in protein_terms:
+                if term in term_to_idx:
+                    labels[term_to_idx[term]] = 1
+                    
+            protein_labels[protein_id] = labels
+        
+        print(f"Created label matrix with {len(term_list)} GO terms")
+        
+        # Save term mapping
+        with open(self.output_dir / f'go_term_mapping_{namespace_filter or "all"}.pkl', 'wb') as f:
+            pickle.dump({
+                'term_to_idx': term_to_idx,
+                'idx_to_term': {idx: term for term, idx in term_to_idx.items()},
+                'term_list': term_list,
+                'namespace_filter': namespace_filter
+            }, f)
+        
+        return protein_labels
+
+    def create_go_datasets(self, protein_graphs, protein_node_features):
+        """Create GO datasets for all aspects"""
         protein_list = list(protein_graphs.keys())
         
-        # You can specify namespace filter for specific GO aspects:
-        # 'molecular_function' - for MF (typically ~273 terms in Struct2GO papers)
-        # 'biological_process' - for BP (typically ~1000+ terms)
-        # 'cellular_component' - for CC (typically ~200+ terms)
-        # None - for all aspects
+        # Create GO labels
+        mf_labels = self.create_go_label_matrix(protein_list, namespace_filter='molecular_function')
+        bp_labels = self.create_go_label_matrix(protein_list, namespace_filter='biological_process')
+        cc_labels = self.create_go_label_matrix(protein_list, namespace_filter='cellular_component')
         
-        mf_labels = self.create_go_label_matrix(
-            protein_list, 
-            namespace_filter='molecular_function'
-        )
-        bp_labels = self.create_go_label_matrix(
-            protein_list, 
-            namespace_filter='biological_process'
-        )
-        cc_labels = self.create_go_label_matrix(
-            protein_list, 
-            namespace_filter='cellular_component'
-        )
-        
-        # Save labels by aspect
+        # Save labels
         with open(self.output_dir / 'protein_labels_mf.pkl', 'wb') as f:
             pickle.dump(mf_labels, f)
         with open(self.output_dir / 'protein_labels_bp.pkl', 'wb') as f:
@@ -491,51 +520,99 @@ class Struct2GODataProcessor:
         with open(self.output_dir / 'protein_labels_cc.pkl', 'wb') as f:
             pickle.dump(cc_labels, f)
         
-        print(f"Saved processed data to {self.output_dir}")
-        print("Files created:")
-        print("- protein_graphs.pkl: DGL graphs for each protein")
-        print("- protein_sequences.pkl: Amino acid sequences")
-        print("- protein_node_features.pkl: One-hot encoded sequence features")
-        print("- protein_contact_maps.pkl: Contact maps")
-        print("- protein_labels_mf.pkl: Molecular function GO labels")
-        print("- protein_labels_bp.pkl: Biological process GO labels") 
-        print("- protein_labels_cc.pkl: Cellular component GO labels")
-        print("- go_term_mapping_molecular_function.pkl: MF GO term index mappings")
-        print("- go_term_mapping_biological_process.pkl: BP GO term index mappings")
-        print("- go_term_mapping_cellular_component.pkl: CC GO term index mappings")
+        # Create Struct2GO format files
+        self.create_dataset_file(protein_graphs, protein_node_features, mf_labels, 'mf')
+        self.create_dataset_file(protein_graphs, protein_node_features, bp_labels, 'bp')
+        self.create_dataset_file(protein_graphs, protein_node_features, cc_labels, 'cc')
+        
+        # Print summary of label counts
+        print(f"\nLabel statistics:")
+        print(f"MF labels: {len(next(iter(mf_labels.values())))} terms")
+        print(f"BP labels: {len(next(iter(bp_labels.values())))} terms") 
+        print(f"CC labels: {len(next(iter(cc_labels.values())))} terms")
+
+    def create_label_network(self, protein_labels, branch='mf'):
+        """Create label network for hierarchical structure"""
+        # Get label dimensions
+        sample_labels = next(iter(protein_labels.values()))
+        n_labels = len(sample_labels)
+        
+        # Create identity matrix as basic label network (can be enhanced with GO hierarchy)
+        label_network = torch.eye(n_labels, dtype=torch.float32)
+        
+        # Save label network
+        with open(self.output_dir / f'label_{branch}_network.pkl', 'wb') as f:
+            pickle.dump(label_network, f)
+        
+        print(f"Created label network: label_{branch}_network.pkl")
+        return label_network
+
+    def create_test_dataset(self, protein_graphs, protein_node_features, protein_labels, branch='mf'):
+        """Create test dataset in MyDataSet compatible format"""
+        # Prepare data in the format expected by MyDataSet
+        # This should match the structure that your training script expects
+        
+        protein_ids = list(protein_graphs.keys())
+        
+        # Create dataset structure
+        dataset_data = []
+        for protein_id in protein_ids:
+            graph = protein_graphs[protein_id]
+            features = protein_node_features[protein_id]
+            labels = protein_labels[protein_id]
+            
+            # Add protein_id to the data for tracking
+            dataset_data.append({
+                'graph': graph,
+                'features': features, 
+                'labels': labels,
+                'protein_id': protein_id
+            })
+        
+        # Save as test dataset
+        with open(self.output_dir / f'{branch}_test_dataset.pkl', 'wb') as f:
+            pickle.dump(dataset_data, f)
+        
+        print(f"Created test dataset: {branch}_test_dataset.pkl")
+        return dataset_data
 
     def create_dataset_file(self, protein_graphs, protein_node_features, protein_labels, branch='mf'):
         """Create dataset file compatible with Struct2GO MyDataSet class"""
         
-        # Create the data structure expected by MyDataSet
-        emb_graph = protein_graphs
-        emb_seq_feature = protein_node_features  
-        emb_label = protein_labels
-        
-        # Save as the format expected by Struct2GO
         with open(self.output_dir / f'emb_graph_{branch}.pkl', 'wb') as f:
-            pickle.dump(emb_graph, f)
+            pickle.dump(protein_graphs, f)
             
         with open(self.output_dir / f'emb_seq_feature_{branch}.pkl', 'wb') as f:
-            pickle.dump(emb_seq_feature, f)
+            pickle.dump(protein_node_features, f)
             
         with open(self.output_dir / f'emb_label_{branch}.pkl', 'wb') as f:
-            pickle.dump(emb_label, f)
+            pickle.dump(protein_labels, f)
+        
+        # Create label network
+        label_network = self.create_label_network(protein_labels, branch)
+        
+        # Create test dataset
+        test_dataset = self.create_test_dataset(protein_graphs, protein_node_features, protein_labels, branch)
         
         print(f"Created Struct2GO compatible dataset files for {branch.upper()}:")
         print(f"- emb_graph_{branch}.pkl")
         print(f"- emb_seq_feature_{branch}.pkl") 
         print(f"- emb_label_{branch}.pkl")
+        print(f"- label_{branch}_network.pkl")
+        print(f"- {branch}_test_dataset.pkl")
 
 def main():
     parser = argparse.ArgumentParser(description='Process protein data for Struct2GO')
     parser.add_argument('--fasta_dir', required=True, help='Directory containing FASTA files')
     parser.add_argument('--pdb_dir', required=True, help='Directory containing PDB files')
     parser.add_argument('--output_dir', required=True, help='Output directory for processed data')
-    parser.add_argument('--obo_file', help='Path to GO OBO file (e.g., GO_June_1_2025.obo)')
+    parser.add_argument('--obo_file', help='Path to GO OBO file')
     parser.add_argument('--gaf_file', help='Path to GO GAF annotation file')
     parser.add_argument('--cmap_thresh', type=float, default=10.0, help='Contact map distance threshold (Å)')
-    parser.add_argument('--download_gaf', action='store_true', help='Download GAF file automatically')
+    parser.add_argument('--structures_only', action='store_true', help='Process only structures, skip GO annotations')
+    parser.add_argument('--annotations_only', action='store_true', help='Process only GO annotations (requires existing structural data)')
+    parser.add_argument('--organism', default='human', choices=['human', 'mouse', 'yeast', 'ecoli', 'uniprot'], 
+                       help='Organism for GO annotations (default: human for speed)')
     
     args = parser.parse_args()
     
@@ -549,36 +626,32 @@ def main():
         cmap_thresh=args.cmap_thresh
     )
     
-    # Process all data
-    protein_graphs, protein_sequences, protein_node_features, protein_contact_maps = processor.process_all_data()
+    # Set organism for download
+    processor.organism = args.organism
     
-    if not protein_graphs:
-        print("No proteins were successfully processed!")
-        return
-    
-    # Save processed data
-    processor.save_processed_data(protein_graphs, protein_sequences, protein_node_features, protein_contact_maps)
-    
-    # Create dataset files compatible with Struct2GO for each GO aspect
-    # Load the saved labels
-    with open(processor.output_dir / 'protein_labels_mf.pkl', 'rb') as f:
-        mf_labels = pickle.load(f)
-    with open(processor.output_dir / 'protein_labels_bp.pkl', 'rb') as f:
-        bp_labels = pickle.load(f)
-    with open(processor.output_dir / 'protein_labels_cc.pkl', 'rb') as f:
-        cc_labels = pickle.load(f)
-    
-    # Create Struct2GO format files for each aspect
-    processor.create_dataset_file(protein_graphs, protein_node_features, mf_labels, 'mf')
-    processor.create_dataset_file(protein_graphs, protein_node_features, bp_labels, 'bp') 
-    processor.create_dataset_file(protein_graphs, protein_node_features, cc_labels, 'cc')
-    
-    print(f"\nProcessing complete! Processed {len(protein_graphs)} proteins.")
-    print(f"Data saved to: {args.output_dir}")
-    print("\nNext steps:")
-    print("1. Use the emb_graph_mf.pkl, emb_seq_feature_mf.pkl, emb_label_mf.pkl files for molecular function prediction")
-    print("2. Use the emb_graph_bp.pkl, emb_seq_feature_bp.pkl, emb_label_bp.pkl files for biological process prediction")
-    print("3. Use the emb_graph_cc.pkl, emb_seq_feature_cc.pkl, emb_label_cc.pkl files for cellular component prediction")
+    if args.structures_only:
+        # Process only structures
+        print("Processing structures only...")
+        protein_graphs, protein_sequences, protein_node_features, protein_contact_maps = processor.process_structures_only()
+        print(f"Structural processing complete! Processed {len(protein_graphs)} proteins.")
+        
+    elif args.annotations_only:
+        # Process only annotations
+        print("Processing annotations only...")
+        processor.process_with_annotations()
+        print("Annotation processing complete!")
+        
+    else:
+        # Process everything
+        print("Processing structures first...")
+        protein_graphs, protein_sequences, protein_node_features, protein_contact_maps = processor.process_structures_only()
+        
+        if protein_graphs:
+            print("Processing annotations...")
+            processor.process_with_annotations(protein_graphs, protein_sequences, protein_node_features, protein_contact_maps)
+            print(f"Complete processing finished! Processed {len(protein_graphs)} proteins.")
+        else:
+            print("No proteins were successfully processed!")
 
 if __name__ == "__main__":
     main()
