@@ -2,27 +2,46 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # Load data
-df = pd.read_csv('training_log_test.csv')
-ef = pd.read_csv('eval_log.csv')
 
-# First: base plot with full training data
-plt.figure(figsize=(10, 5))
-plt.plot(df['episode'], df['reward'], label='reward', alpha=0.7)
+def graphit(Training_Path, Eval_Path,Graph_Path):
 
-# Now: overlay eval data, but only every 20,000th point
-df_sampled = df[df['episode'] % 10000 == 0]
+    df = pd.read_csv(Training_Path)
 
-# Overlay sampled evaluation data as a dotted red line or points
-plt.plot( df_sampled['episode'], df_sampled['selected_amount'], label='Number of answers', linestyle='--', color='red', marker='o')
+    # First: base plot with full training data
+    plt.figure(figsize=(10, 5))
+    plt.plot(df['episode'], df['reward'], label='reward', alpha=0.7)
 
-# Labels and legend
-plt.xlabel('Episode')
-plt.ylabel('Reward')
-plt.title('Training reward and chosen')
-plt.legend()
-plt.grid(True)
-plt.tight_layout()
+    # Now: overlay eval data, but only every 20,000th point
+    df_sampled = df[df['episode'] % 10000 == 0]
 
-# Show plot
-plt.show()
-plt.savefig("combined")
+    # Overlay sampled evaluation data as a dotted red line or points
+    plt.plot( df_sampled['episode'], df_sampled['selected_amount'], label='Number of answers', linestyle='--', color='red', marker='o')
+
+    # Labels and legend
+    plt.xlabel('Episode')
+    plt.ylabel('Reward')
+    plt.title('Training reward and chosen')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+
+    # Show plot
+    plt.savefig(Graph_Path,"reward+selected")
+    plt.close()
+
+    plt.figure(figsize=(10, 5))
+    plt.plot( df['episode'], df['reward'], label='reward', alpha=0.7)
+    plt.savefig(Graph_Path,"training")
+    plt.close()
+
+    ef = pd.read_csv(Eval_Path)
+    plt.figure(figsize=(10, 5))
+    plt.plot(ef['episode'], ef['reward'], label='reward', alpha=0.7)
+
+    plt.savefig(Graph_Path,"eval")
+    plt.close()
+
+
+
+
+

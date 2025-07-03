@@ -8,13 +8,18 @@ import torch.optim as optim
 import numpy as np
 import gym
 import time
+import datetime
 from go_env import GOEnv, proteins, all_go_terms, protein_data_for_env  # You wrote this already
-
+from Graph_Log import graphit
+whenRan = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
 
 SAVE_DIR = "saved_models"
+
 os.makedirs(SAVE_DIR, exist_ok=True)
-BEST_MODEL_DIR = os.path.join(SAVE_DIR, "best")
-CHECKPOINT_DIR = os.path.join(SAVE_DIR, "checkpoints")
+os.makedirs(os.path.join(SAVE_DIR,whenRan), exist_ok=True)
+os.makedirs(os.path.join(SAVE_DIR,whenRan, "graph"), exist_ok=True)
+BEST_MODEL_DIR = os.path.join(SAVE_DIR,whenRan, "best")
+CHECKPOINT_DIR = os.path.join(SAVE_DIR,whenRan, "checkpoints")
 # Create folders if they don't exist
 os.makedirs(BEST_MODEL_DIR, exist_ok=True)
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
@@ -51,11 +56,11 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
     epsilon = 1e-8  # to avoid division by zero
 
     # Create CSV headers
-    if not os.path.exists(eval_log):
+    if not os.path.exists(os.path.join(SAVE_DIR, whenRan, eval_log)):
         with open(eval_log, mode='w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(['episode', 'avg_reward', 'time'])
-    if not os.path.exists(training_log):
+    if not os.path.exists(os.path.join(SAVE_DIR, whenRan, training_log)):
         with open(training_log, mode='w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(['episode', 'reward','selected_amount','time'])
@@ -94,7 +99,7 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
         loss.backward()
         optimizer.step()
 
-        with open(training_log, mode='a', newline='') as f:
+        with open(os.path.join(SAVE_DIR,whenRan,training_log), mode='a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([episode, reward, num_selected_terms,time.time() - startTime])
         if episode > 0 and episode % Reset_Interval == 0:
@@ -112,7 +117,7 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
             torch.save(policy.state_dict(), checkpoint_path)
             print(f"📝 Checkpoint saved to {checkpoint_path}")
 
-            with open(eval_log, mode='a', newline='') as f:
+            with open(os.path.join(SAVE_DIR,whenRan,eval_log), mode='a', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([episode, avg_reward,time.time() - startTime])
 
@@ -136,7 +141,7 @@ def evaluate(policy, env, episodes=20, episode_idx=0, best_avg_reward=None):
 
     # Save best model
     if best_avg_reward is None or avg_reward > best_avg_reward:
-        path = os.path.join(BEST_MODEL_DIR, f"best_model_episode_{episode_idx}.pt")
+        path = os.path.join(os.path.join(SAVE_DIR, whenRan,BEST_MODEL_DIR), f"best_model_episode_{episode_idx}.pt")
         torch.save(policy.state_dict(), path)
         print(f"💾 Saved best model to {path}")
         best_avg_reward = avg_reward
@@ -152,3 +157,5 @@ if __name__ == "__main__":
     optimizer = optim.Adam(policy.parameters(), lr=1e-4)
 
     train(env, policy, optimizer, episodes=125000)
+
+    graphit(os.path.join(SAVE_DIR,whenRan,'training_log_test.csv'), os.path.join(SAVE_DIR,whenRan,'eval_log.csv'),os.path.join(SAVE_DIR,whenRan,"graph"))
