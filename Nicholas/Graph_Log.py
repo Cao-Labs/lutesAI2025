@@ -36,7 +36,7 @@ def graphit(Training_Path, Eval_Path,Graph_Path):
 
     ef = pd.read_csv(Eval_Path)
     plt.figure(figsize=(10, 5))
-    plt.plot(ef['episode'], ef['reward'], label='reward', alpha=0.7)
+    plt.plot(ef['avg_reward'], ef['reward'], label='reward', alpha=0.7)
 
     plt.savefig(Graph_Path,"eval")
     plt.close()
