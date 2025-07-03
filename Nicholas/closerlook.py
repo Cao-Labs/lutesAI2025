@@ -43,10 +43,5 @@ def plot_csv_graph(csv_subdir, x_col='episode', y_col='reward', num_points=None,
     plt.tight_layout()
 
     # Save or display
-    if save_path:
-        plt.savefig(save_path)
-        print(f"[INFO] Plot saved to: {save_path}")
-    else:
-        plt.show()
-
+    plt.savefig("closerlook.png")
     plt.close()
