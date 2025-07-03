@@ -3,89 +3,121 @@ import torch.nn.functional as F
 import argparse
 import numpy as np
 import pandas as pd
-from dgl.dataloading import GraphDataLoader
 import pickle
 from pathlib import Path
 import warnings
 warnings.filterwarnings('ignore')
 
-def create_dataset_from_structural_data(graphs, features, labels_num=273):
-    """Create dataset from your structural data with dummy labels"""
+# Import DGL with legacy compatibility
+try:
+    import dgl
+    from dgl.dataloading import GraphDataLoader
+    print(f"DGL version: {dgl.__version__}")
+except ImportError:
+    print("DGL not available")
+
+def create_legacy_dataset(graphs, features, labels_num=273):
+    """Create dataset compatible with older DGL versions"""
     dataset = []
     protein_ids = list(graphs.keys())
     
     for protein_id in protein_ids:
         graph = graphs[protein_id]
         feature = features[protein_id]
+<<<<<<< Updated upstream
         dummy_labels = torch.zeros(labels_num)  # Dummy labels, not used for prediction
+=======
+        dummy_labels = torch.zeros(labels_num)
         
-        # Format: (graph, labels, sequence_feature) - matches original script
+        # For older DGL, ensure graph is properly formatted
+        if hasattr(graph, 'ndata'):
+            # Add features to graph nodes (legacy format)
+            graph.ndata['feat'] = feature  # Try 'feat' instead of 'feature'
+            graph.ndata['h'] = feature     # Also try 'h' as backup
+>>>>>>> Stashed changes
+        
+        # Legacy dataset format
         dataset.append((graph, dummy_labels, feature))
     
     return dataset, protein_ids
 
-def predict_only(model, test_dataloader, label_network, device='cuda'):
-    """Run predictions without evaluation"""
+def predict_legacy(model, graphs, features, label_network, device='cpu'):
+    """Legacy prediction without DataLoader issues"""
     
     model.eval()
     all_predictions = []
-    batch_count = 0
+    protein_ids = list(graphs.keys())
     
-    print("Running predictions...")
+    print(f"Running legacy predictions on {len(protein_ids)} proteins...")
     
     with torch.no_grad():
-        for batched_graph, labels, sequence_feature in test_dataloader:
-            # Same prediction logic as original script
-            logits = model(batched_graph.to(device), sequence_feature.to(device), label_network.to(device))
-            predictions = torch.sigmoid(logits)
-            
-            all_predictions.append(predictions.cpu().numpy())
-            batch_count += 1
-            
-            if batch_count % 100 == 0:
-                print(f"Processed {batch_count} batches...")
+        for i, protein_id in enumerate(protein_ids):
+            try:
+                graph = graphs[protein_id].to(device)
+                feature = features[protein_id].to(device)
+                
+                # Ensure graph has node features
+                if 'feat' not in graph.ndata and 'feature' not in graph.ndata:
+                    graph.ndata['feat'] = feature
+                    graph.ndata['feature'] = feature
+                
+                # Create batch of 1
+                batched_graph = dgl.batch([graph])
+                batched_feature = feature.unsqueeze(0)  # Add batch dimension
+                
+                # Model prediction
+                logits = model(batched_graph, batched_feature, label_network.to(device))
+                predictions = torch.sigmoid(logits)
+                
+                all_predictions.append(predictions.cpu().numpy())
+                
+                if (i + 1) % 100 == 0:
+                    print(f"Processed {i + 1}/{len(protein_ids)} proteins...")
+                    
+            except Exception as e:
+                print(f"Error processing protein {protein_id}: {e}")
+                # Add dummy prediction to maintain order
+                dummy_pred = np.zeros((1, label_network.shape[0]))
+                all_predictions.append(dummy_pred)
+                continue
     
-    return np.vstack(all_predictions)
+    return np.vstack(all_predictions), protein_ids
 
 def save_predictions(predictions, protein_ids, output_path, threshold=0.5):
     """Save predictions to file"""
     
-    # Create simple column names
     go_terms = [f"GO_term_{i}" for i in range(predictions.shape[1])]
     
-    # Create DataFrame
+    # Raw predictions
     df = pd.DataFrame(predictions, columns=go_terms, index=protein_ids)
     df.index.name = 'protein_id'
     
-    # Save raw predictions
     raw_output = output_path.replace('.csv', '_raw_predictions.csv')
     df.to_csv(raw_output)
     print(f"Saved raw predictions to {raw_output}")
     
-    # Save thresholded predictions
+    # Binary predictions
     binary_predictions = (predictions > threshold).astype(int)
     df_binary = pd.DataFrame(binary_predictions, columns=go_terms, index=protein_ids)
     df_binary.index.name = 'protein_id'
     binary_output = output_path.replace('.csv', '_binary_predictions.csv')
     df_binary.to_csv(binary_output)
-    print(f"Saved binary predictions (threshold={threshold}) to {binary_output}")
+    print(f"Saved binary predictions to {binary_output}")
     
-    # Summary
     print(f"\nPrediction Summary:")
     print(f"Number of proteins: {len(protein_ids)}")
     print(f"Number of GO terms: {predictions.shape[1]}")
     print(f"Average predictions per protein: {np.mean(np.sum(binary_predictions, axis=1)):.2f}")
-    print(f"Score range: {np.min(predictions):.3f} - {np.max(predictions):.3f}")
 
 def main():
-    parser = argparse.ArgumentParser(description='Run predictions from structural data only')
-    parser.add_argument('--graphs_file', required=True, help='Path to protein_graphs.pkl')
-    parser.add_argument('--features_file', required=True, help='Path to protein_node_features.pkl')
-    parser.add_argument('--model', required=True, help='Path to trained model')
-    parser.add_argument('--output_dir', required=True, help='Output directory')
-    parser.add_argument('--labels_num', type=int, default=273, help='Number of labels model expects')
-    parser.add_argument('--threshold', type=float, default=0.5, help='Threshold for binary predictions')
-    parser.add_argument('--device', default='cuda', help='Device to use')
+    parser = argparse.ArgumentParser(description='Legacy prediction for older DGL/PyTorch')
+    parser.add_argument('--graphs_file', required=True)
+    parser.add_argument('--features_file', required=True)
+    parser.add_argument('--model', required=True)
+    parser.add_argument('--output_dir', required=True)
+    parser.add_argument('--labels_num', type=int, default=273)
+    parser.add_argument('--threshold', type=float, default=0.5)
+    parser.add_argument('--device', default='cpu')
     
     args = parser.parse_args()
     
@@ -93,8 +125,6 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
     
     print("Loading structural data...")
-    
-    # Load your processed structural data
     with open(args.graphs_file, 'rb') as f:
         graphs = pickle.load(f)
     
@@ -103,36 +133,28 @@ def main():
     
     print(f"Loaded data for {len(graphs)} proteins")
     
-    # Create simple label network (identity matrix)
+    # Simple label network
     label_network = torch.eye(args.labels_num, dtype=torch.float32)
     
-    # Create dataset
-    dataset, protein_ids = create_dataset_from_structural_data(graphs, features, args.labels_num)
-    
-    # Create dataloader
-    dataloader = GraphDataLoader(
-        dataset=dataset, 
-        batch_size=1,
-        drop_last=False, 
-        shuffle=False
-    )
-    
-    # Load model
+    # Load model with legacy compatibility
     print("Loading model...")
-    model = torch.load(args.model)
-    model.to(args.device)
+    try:
+        model = torch.load(args.model, map_location=args.device)
+        model.to(args.device)
+        model.eval()
+        print("Model loaded successfully")
+    except Exception as e:
+        print(f"Error loading model: {e}")
+        return
     
-    # Run predictions
-    predictions = predict_only(model, dataloader, label_network, args.device)
+    # Run legacy predictions
+    predictions, protein_ids = predict_legacy(model, graphs, features, label_network, args.device)
     
     # Save results
     output_path = output_dir / 'predictions.csv'
     save_predictions(predictions, protein_ids, str(output_path), args.threshold)
     
     print(f"\nDone! Check {output_dir} for results.")
-
-if __name__ == "__main__":
-    main()
 
 if __name__ == "__main__":
     main()
