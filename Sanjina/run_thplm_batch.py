@@ -4,7 +4,19 @@ import subprocess
 
 # Paths
 input_fasta = "/data/shared/github/lutesAI2025/Sanjina/test_input/small_test.fasta"
-variant_placeholder = "A3V"  # Dummy variant for now
+
+# Dynamically create a valid mutation based on actual wild residue
+try:
+    wild_residue = sequence[2]  # position 3 in 0-based index
+except IndexError:
+    print(f"Skipping {seq_id}: sequence too short")
+    continue
+
+if wild_residue != "V":
+    variant_placeholder = f"{wild_residue}3V"
+else:
+    variant_placeholder = f"{wild_residue}3A"
+    
 temp_dir = "/data/shared/github/lutesAI2025/Sanjina/temp/"
 output_dir = "/data/summer2020/Sanjina/thplm_outputs/"
 extract_script = "/data/shared/tools/THPLM/esmcripts/extract.py"
