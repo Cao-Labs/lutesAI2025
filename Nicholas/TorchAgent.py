@@ -56,14 +56,18 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
     epsilon = 1e-8  # to avoid division by zero
 
     # Create CSV headers
-    if not os.path.exists(os.path.join(SAVE_DIR, whenRan, eval_log)):
-        with open(eval_log, mode='w', newline='') as f:
+    training_log_path = os.path.join(SAVE_DIR, whenRan, training_log)
+    eval_log_path = os.path.join(SAVE_DIR, whenRan, eval_log)
+
+    if not os.path.exists(eval_log_path):
+        with open(eval_log_path, mode='w', newline='', encoding='utf-8-sig') as f:
             writer = csv.writer(f)
             writer.writerow(['episode', 'avg_reward', 'time'])
-    if not os.path.exists(os.path.join(SAVE_DIR, whenRan, training_log)):
-        with open(training_log, mode='w', newline='') as f:
+
+    if not os.path.exists(training_log_path):
+        with open(training_log_path, mode='w', newline='', encoding='utf-8-sig') as f:
             writer = csv.writer(f)
-            writer.writerow(['episode', 'reward','selected_amount','time'])
+            writer.writerow(['episode', 'reward', 'selected_amount', 'time'])
 
     for episode in range(episodes):
         obs = env.reset()
