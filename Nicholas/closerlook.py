@@ -15,7 +15,7 @@ def plot_csv_graph(csv_subdir, x_col='episode', y_col='reward', num_points=None,
         save_path (str, optional): If provided, saves the graph to this path.
     """
     # Build full CSV path
-    full_path = os.path.join("saved_models", csv_subdir, "training_log_test.csv")
+    full_path = os.path.join("saved_models", '2025-07-03_02-49', "training_log_test.csv")
 
     if not os.path.exists(full_path):
         print(f"[ERROR] CSV file not found at: {full_path}")
