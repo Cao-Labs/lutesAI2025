@@ -163,8 +163,38 @@ class Struct2GOProcessor:
         # In practice, this would come from dict_sequence_feature
         return np.random.normal(0, 0.1, (1024,)).astype(np.float32)
 
+    def load_fasta_sequences(self):
+        """Load FASTA sequences"""
+        sequences = {}
+        
+        if not self.fasta_dir:
+            print("No FASTA directory provided, using PDB sequences only")
+            return sequences
+            
+        print(f"Loading FASTA sequences from {self.fasta_dir}")
+        fasta_files = list(self.fasta_dir.glob("*.fasta")) + list(self.fasta_dir.glob("*.fa")) + list(self.fasta_dir.glob("*.faa"))
+        
+        if not fasta_files:
+            print(f"No FASTA files found in {self.fasta_dir}")
+            return sequences
+            
+        for fasta_file in tqdm(fasta_files, desc="Loading FASTA files"):
+            try:
+                for record in SeqIO.parse(fasta_file, "fasta"):
+                    protein_id = record.id.split('|')[1] if '|' in record.id else record.id
+                    sequences[protein_id] = str(record.seq).upper()
+            except Exception as e:
+                print(f"Error processing {fasta_file}: {e}")
+                continue
+                
+        print(f"Loaded {len(sequences)} sequences from FASTA files")
+        return sequences
+
     def process_proteins(self):
         """Process all proteins using the exact original pipeline"""
+        
+        # Load FASTA sequences first
+        fasta_sequences = self.load_fasta_sequences()
         
         protein_graphs = {}
         protein_node_features = {}  # 56-dim features for graph nodes
@@ -196,17 +226,33 @@ class Struct2GOProcessor:
                     protein_id = pdb_file.stem.replace('.pdb', '')
                 
                 # Load using original load_cmap function
-                A, S_original, seq = self.load_cmap(pdb_path, self.cmap_thresh)
+                A, S_original, pdb_seq = self.load_cmap(pdb_path, self.cmap_thresh)
                 
-                if A is None or len(seq) == 0:
+                if A is None or len(pdb_seq) == 0:
                     continue
+                
+                # Use FASTA sequence if available, otherwise use PDB sequence
+                if protein_id in fasta_sequences:
+                    final_seq = fasta_sequences[protein_id]
+                    print(f"Using FASTA sequence for {protein_id} (length: {len(final_seq)})")
+                else:
+                    final_seq = pdb_seq
+                    print(f"Using PDB sequence for {protein_id} (length: {len(final_seq)})")
+                
+                # Ensure sequence and structure match in length
+                if len(final_seq) != A.shape[1]:
+                    print(f"Length mismatch for {protein_id}: seq={len(final_seq)}, struct={A.shape[1]}")
+                    # Use the shorter length
+                    min_len = min(len(final_seq), A.shape[1])
+                    final_seq = final_seq[:min_len]
+                    A = A[:, :min_len, :min_len]
                 
                 # Create 56-dimensional node features (for graph nodes)
                 distances_2d = A.squeeze(0)  # Remove batch dimension
-                node_features_56 = self.create_56_dim_features(seq, distances_2d)
+                node_features_56 = self.create_56_dim_features(final_seq, distances_2d)
                 
                 # Create 1024-dimensional sequence features (for sequence input)
-                sequence_features_1024 = self.create_1024_sequence_features(seq)
+                sequence_features_1024 = self.create_1024_sequence_features(final_seq)
                 
                 # Create graph from contact map (exactly like original)
                 edges_data = []
