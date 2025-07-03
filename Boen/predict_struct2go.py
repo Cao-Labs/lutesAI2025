@@ -24,9 +24,6 @@ def create_legacy_dataset(graphs, features, labels_num=273):
     for protein_id in protein_ids:
         graph = graphs[protein_id]
         feature = features[protein_id]
-<<<<<<< Updated upstream
-        dummy_labels = torch.zeros(labels_num)  # Dummy labels, not used for prediction
-=======
         dummy_labels = torch.zeros(labels_num)
         
         # For older DGL, ensure graph is properly formatted
@@ -34,7 +31,6 @@ def create_legacy_dataset(graphs, features, labels_num=273):
             # Add features to graph nodes (legacy format)
             graph.ndata['feat'] = feature  # Try 'feat' instead of 'feature'
             graph.ndata['h'] = feature     # Also try 'h' as backup
->>>>>>> Stashed changes
         
         # Legacy dataset format
         dataset.append((graph, dummy_labels, feature))
