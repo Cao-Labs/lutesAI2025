@@ -2,47 +2,46 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os
 
-def plot_csv_graph(csv_path, x_col, y_col, num_points=None, title="Graph", save_path=None):
+def plot_csv_graph(csv_subdir, x_col='episode', y_col='reward', num_points=None, title="Graph", save_path=None):
     """
     Plots a graph from a CSV file with optional point sampling.
 
     Parameters:
-        csv_path (str): Path to the CSV file.
-        x_col (str): Name of the column to use as the x-axis.
-        y_col (str): Name of the column to use as the y-axis.
+        csv_subdir (str): Subdirectory under 'saved_models' where the CSV is stored.
+        x_col (str): Column to use as x-axis (default: 'episode').
+        y_col (str): Column to use as y-axis (default: 'reward').
         num_points (int, optional): Number of points to plot. If None, plot all.
         title (str): Title of the graph.
         save_path (str, optional): If provided, saves the graph to this path.
     """
+    # Build full CSV path
+    full_path = os.path.join("saved_models", '2025-07-03_02-49', "training_log_test.csv")
 
-    # Load CSV
-    print("what directory")
-    path = input()
-    print("How many points to plot?")
-    num_points = int(input())
+    if not os.path.exists(full_path):
+        print(f"[ERROR] CSV file not found at: {full_path}")
+        return
 
-    # Correct way to build the path
-    full_path = os.path.join("saved_models", csv_path, "training_log_test.csv")
+    # Load data
     df = pd.read_csv(full_path)
 
-    # Sample points if num_points is specified and less than total
+    # Validate columns
+    if x_col not in df.columns or y_col not in df.columns:
+        print(f"[ERROR] Columns '{x_col}' or '{y_col}' not found in CSV.")
+        return
+
+    # Optional downsampling
     if num_points is not None and num_points < len(df):
-        df = df.iloc[::len(df)//num_points]
+        df = df.iloc[::len(df) // num_points]
 
     # Plot
     plt.figure(figsize=(10, 5))
-    plt.plot(df['episode'], df['reward'], marker='o', linestyle='-', alpha=0.8)
+    plt.plot(df[x_col], df[y_col], marker='o', linestyle='-', alpha=0.8)
     plt.xlabel(x_col)
     plt.ylabel(y_col)
     plt.title(title)
     plt.grid(True)
     plt.tight_layout()
 
-    # Save or show
-    if save_path:
-        plt.savefig(save_path)
-        print(f"Plot saved to {save_path}")
-    else:
-        plt.show()
-
+    # Save or display
+    plt.savefig("closerlook.png")
     plt.close()
