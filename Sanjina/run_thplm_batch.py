@@ -6,7 +6,7 @@ import subprocess
 input_fasta = "/data/shared/github/lutesAI2025/Sanjina/test_input/small_test.fasta"
 temp_dir = "/data/shared/github/lutesAI2025/Sanjina/temp/"
 output_dir = "/data/summer2020/Sanjina/thplm_outputs/"
-extract_script = "/data/shared/tools/THPLM/esmcripts/extract.py"
+extract_script = "/data/shared/tools/THPLM/esmscripts/extract.py"
 thplm_script = "/data/shared/tools/THPLM/THPLM_predict.py"
 
 # Create temp and output dirs
