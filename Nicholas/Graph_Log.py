@@ -4,7 +4,8 @@ import os
 
 def graphit(Training_Path, Eval_Path, Graph_Path):
     # Load training data
-    df = pd.read_csv(Training_Path)
+    df = pd.read_csv(Training_Path, encoding='utf-8-sig')
+    print("Training log columns:", df.columns.tolist())
 
     # Create directory if it doesn't exist
     os.makedirs(Graph_Path, exist_ok=True)
@@ -39,7 +40,7 @@ def graphit(Training_Path, Eval_Path, Graph_Path):
     plt.close()
 
     # 3. Plot: Evaluation data
-    ef = pd.read_csv(Eval_Path)
+    ef = pd.read_csv(Eval_Path, encoding='utf-8-sig')
     plt.figure(figsize=(10, 5))
     plt.plot(ef['avg_reward'], ef['reward'], label='Evaluation Reward', alpha=0.7)
     plt.xlabel('Average Reward')
