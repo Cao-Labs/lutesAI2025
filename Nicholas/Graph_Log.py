@@ -42,7 +42,7 @@ def graphit(Training_Path, Eval_Path, Graph_Path):
     # 3. Plot: Evaluation data
     ef = pd.read_csv(Eval_Path, encoding='utf-8-sig')
     plt.figure(figsize=(10, 5))
-    plt.plot(ef['avg_reward'], ef['reward'], label='Evaluation Reward', alpha=0.7)
+    plt.plot(ef['episode'], ef['avg_reward'], label='Evaluation Reward', alpha=0.7)
     plt.xlabel('Average Reward')
     plt.ylabel('Reward')
     plt.title('Evaluation Plot')
