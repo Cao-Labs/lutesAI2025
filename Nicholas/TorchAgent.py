@@ -163,6 +163,6 @@ if __name__ == "__main__":
     policy = PolicyNetwork(input_size=512, output_size=env.max_choices).to(device)
     optimizer = optim.Adam(policy.parameters(), lr=1e-4)
 
-    train(env, policy, optimizer, episodes=10000)
+    train(env, policy, optimizer, episodes=500)
 
     graphit(os.path.join(SAVE_DIR,whenRan,'training_log_test.csv'), os.path.join(SAVE_DIR,whenRan,'eval_log.csv'),os.path.join(SAVE_DIR,whenRan,"graph"))
