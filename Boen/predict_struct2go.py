@@ -17,7 +17,10 @@ def create_dataset_from_structural_data(graphs, features, labels_num=273):
     for protein_id in protein_ids:
         graph = graphs[protein_id]
         feature = features[protein_id]
-        dummy_labels = torch.zeros(labels_num)  # Dummy labels, not used for prediction
+        dummy_labels = torch.zeros(labels_num)
+        
+        # Add node features to the graph (this is what the model expects!)
+        graph.ndata['feature'] = feature
         
         # Format: (graph, labels, sequence_feature) - matches original script
         dataset.append((graph, dummy_labels, feature))
