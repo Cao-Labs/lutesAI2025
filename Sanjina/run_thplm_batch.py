@@ -4,19 +4,6 @@ import subprocess
 
 # Paths
 input_fasta = "/data/shared/github/lutesAI2025/Sanjina/test_input/small_test.fasta"
-
-# Dynamically create a valid mutation based on actual wild residue
-try:
-    wild_residue = sequence[2]  # position 3 in 0-based index
-except IndexError:
-    print(f"Skipping {seq_id}: sequence too short")
-    continue
-
-if wild_residue != "V":
-    variant_placeholder = f"{wild_residue}3V"
-else:
-    variant_placeholder = f"{wild_residue}3A"
-    
 temp_dir = "/data/shared/github/lutesAI2025/Sanjina/temp/"
 output_dir = "/data/summer2020/Sanjina/thplm_outputs/"
 extract_script = "/data/shared/tools/THPLM/esmcripts/extract.py"
@@ -25,9 +12,6 @@ thplm_script = "/data/shared/tools/THPLM/THPLM_predict.py"
 # Create temp and output dirs
 os.makedirs(temp_dir, exist_ok=True)
 os.makedirs(output_dir, exist_ok=True)
-
-# Output results dict
-results_file = os.path.join(output_dir, "thplm_ddg_results.json")
 
 # Start processing
 print("Starting batch prediction...")
@@ -38,24 +22,36 @@ with open(input_fasta) as handle:
 
         print(f"[{i+1}] Processing {seq_id}")
 
+        # Dynamically create a valid mutation based on actual wild residue
+        try:
+            wild_residue = sequence[2]  # position 3 (index 2)
+        except IndexError:
+            print(f"Skipping {seq_id}: sequence too short")
+            continue
+
+        if wild_residue != "V":
+            variant_placeholder = f"{wild_residue}3V"
+        else:
+            variant_placeholder = f"{wild_residue}3A"
+
         # 1. Create variant.txt
         variant_file = os.path.join(temp_dir, "variant.txt")
         with open(variant_file, "w") as vf:
-            vf.write(variant_placeholder + "\n")  # You can customize this
+            vf.write(variant_placeholder + "\n")
 
         # 2. Create fasta file
         wt_fasta = os.path.join(temp_dir, "wild.fasta")
         with open(wt_fasta, "w") as wf:
             wf.write(f">{seq_id}\n{sequence}\n")
 
-        # 3. Create variant_fasta with dummy mutated sequence
+        # 3. Create variant_fasta
+        mutated_seq = sequence[:2] + variant_placeholder[-1] + sequence[3:]
         variant_fasta = os.path.join(temp_dir, "varlist.fasta")
-        mutated_seq = sequence[:2] + "V" + sequence[3:]  # Just for testing
         with open(variant_fasta, "w") as vfasta:
             vfasta.write(f">{seq_id}\n{sequence}\n")
             vfasta.write(f">{seq_id}_{variant_placeholder}\n{mutated_seq}\n")
 
-        # 4. Create sub-output directory
+        # 4. Create output dir
         sample_output_dir = os.path.join(output_dir, f"{seq_id}/")
         os.makedirs(sample_output_dir, exist_ok=True)
 
@@ -71,10 +67,8 @@ with open(input_fasta) as handle:
         ]
         subprocess.run(cmd, check=True)
 
-        # 6. Clean up temp files
+        # 6. Clean up
         for f in [variant_file, wt_fasta, variant_fasta]:
             os.remove(f)
 
 print("✅ All sequences processed.")
-
-
