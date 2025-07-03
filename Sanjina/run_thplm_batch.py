@@ -3,7 +3,7 @@ from Bio import SeqIO
 import subprocess
 
 # Paths
-input_fasta = "/data/summer2020/Boen/benchmark_testing_sequences.fasta"
+input_fasta = "/data/shared/github/lutesAI2025/Sanjina/test_input/small_test.fasta"
 variant_placeholder = "A3V"  # Dummy variant for now
 temp_dir = "/data/shared/github/lutesAI2025/Sanjina/temp/"
 output_dir = "/data/summer2020/Sanjina/thplm_outputs/"
@@ -64,3 +64,5 @@ with open(input_fasta) as handle:
             os.remove(f)
 
 print("✅ All sequences processed.")
+
+Switched to test input fasta for small batch test
