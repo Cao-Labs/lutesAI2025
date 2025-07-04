@@ -316,7 +316,7 @@ def main():
     source_data_dir = Path(args.source_data_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Define model configurations with correct label counts
+    # Define model configurations - ONLY BP and MF
     model_configs = {
         'BP': {
             'model_file': 'mymodel_bp_1_0.0005_0.45.pkl',
@@ -327,12 +327,8 @@ def main():
             'model_file': 'mymodel_mf_1_0.0005_0.45.pkl', 
             'labels_num': 273,
             'label_network_file': processed_data_dir / 'label_mf_network.pkl'
-        },
-        'CC': {
-            'model_file': 'mymodel_cc_1_0.0005_0.45.pkl',
-            'labels_num': 298,
-            'label_network_file': processed_data_dir / 'label_cc_network.pkl'
         }
+        # CC temporarily disabled due to missing correct gos_cc.csv
     }
     
     # Load GO term mappings
@@ -446,16 +442,21 @@ def main():
     # Use mapped protein IDs for final output
     final_protein_ids = mapped_protein_ids if id_mapping else protein_ids
     
-    # Combine all predictions
-    if len(all_predictions) == 3:
+    # Combine predictions (only BP and MF)
+    if len(all_predictions) >= 2:
         print(f"\n{'='*50}")
-        print("Combining predictions from all ontologies...")
+        print("Combining predictions from available ontologies...")
         print(f"{'='*50}")
         
+        # Get predictions (CC might be missing)
+        bp_preds = all_predictions.get('BP', np.array([]))
+        mf_preds = all_predictions.get('MF', np.array([]))
+        cc_preds = all_predictions.get('CC', np.array([]).reshape(len(final_protein_ids), 0))  # Empty array for missing CC
+        
         combined_df, binary_df = combine_predictions(
-            all_predictions['BP'],
-            all_predictions['MF'], 
-            all_predictions['CC'],
+            bp_preds,
+            mf_preds, 
+            cc_preds,
             final_protein_ids,
             output_dir,
             go_mappings,
@@ -463,15 +464,17 @@ def main():
             args.min_confidence
         )
         
-        print(f"\nAll predictions saved to {output_dir}")
+        print(f"\nPredictions saved to {output_dir}")
         print("Files created:")
         print("  - predictions_simple.csv (protein_id - go_term - confidence_score)")
         print("  - predictions_long_format.csv (includes ontology and binary prediction)")
         print("  - predictions_high_confidence.csv (only high confidence predictions)")
         print("  - prediction_summary.csv (summary statistics)")
+        print(f"\nNote: Only {len(all_predictions)} ontologies processed (BP and MF)")
         
     else:
-        print(f"Warning: Only {len(all_predictions)} ontologies processed successfully")
+        print(f"Error: Only {len(all_predictions)} ontologies processed successfully")
+        print("Need at least BP and MF to generate predictions")
 
 if __name__ == "__main__":
     main()
