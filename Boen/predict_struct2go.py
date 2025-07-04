@@ -40,7 +40,7 @@ def predict_ontology(model, graphs, node_features, sequence_features, label_netw
                 batched_graph = dgl.batch([graph])
                 batched_sequence_feature = sequence_feature.unsqueeze(0)
                 
-                # Model prediction
+                # Model prediction - the model expects (graph, sequence_feature, label_network)
                 logits = model(batched_graph, batched_sequence_feature, label_network.to(device))
                 predictions = torch.sigmoid(logits)
                 
@@ -58,6 +58,92 @@ def predict_ontology(model, graphs, node_features, sequence_features, label_netw
     
     return np.vstack(all_predictions), protein_ids
 
+def load_go_mappings(source_data_dir):
+    """Load GO term mappings from the source data files"""
+    mappings = {}
+    
+    # Load each ontology's GO terms
+    for ontology in ['bp', 'mf', 'cc']:
+        go_file = source_data_dir / f'gos_{ontology}.csv'
+        print(f"Loading GO terms from {go_file}")
+        
+        try:
+            df = pd.read_csv(go_file)
+            
+            # Extract unique GO terms for this ontology
+            go_column = f'{ontology.upper()}-GO'
+            if go_column in df.columns:
+                unique_terms = sorted(df[go_column].unique())
+            else:
+                # Try alternative column names
+                possible_cols = [col for col in df.columns if 'GO' in col.upper()]
+                if possible_cols:
+                    unique_terms = sorted(df[possible_cols[0]].unique())
+                else:
+                    print(f"Warning: No GO column found in {go_file}")
+                    continue
+            
+            # Create index mapping (term -> index)
+            term_to_idx = {term: idx for idx, term in enumerate(unique_terms)}
+            idx_to_term = {idx: term for term, idx in term_to_idx.items()}
+            
+            mappings[ontology.upper()] = {
+                'term_to_idx': term_to_idx,
+                'idx_to_term': idx_to_term,
+                'terms': unique_terms
+            }
+            
+            print(f"  Loaded {len(unique_terms)} {ontology.upper()} terms")
+            
+        except Exception as e:
+            print(f"Error loading {go_file}: {e}")
+            continue
+    
+    return mappings
+
+def load_protein_id_mapping(idmapping_file):
+    """Load protein ID mapping from idmapping_uni.txt"""
+    print(f"Loading protein ID mappings from {idmapping_file}")
+    
+    id_mapping = {}
+    try:
+        # idmapping_uni.txt format: uniprot_id \t other_id
+        with open(idmapping_file, 'r') as f:
+            for line in f:
+                parts = line.strip().split('\t')
+                if len(parts) >= 2:
+                    uniprot_id = parts[0]  # e.g., Q6GZX4
+                    other_id = parts[1]    # e.g., 001R_FRG3G
+                    # Map both directions
+                    id_mapping[uniprot_id] = other_id
+                    id_mapping[other_id] = uniprot_id
+        
+        print(f"  Loaded mappings for {len(id_mapping)//2} protein IDs")
+        
+    except Exception as e:
+        print(f"Error loading {idmapping_file}: {e}")
+    
+    return id_mapping
+
+def map_protein_ids(protein_ids, id_mapping):
+    """Map protein IDs using the mapping dictionary"""
+    mapped_ids = []
+    unmapped_count = 0
+    
+    for protein_id in protein_ids:
+        # Try direct match first
+        if protein_id in id_mapping:
+            mapped_ids.append(id_mapping[protein_id])
+        else:
+            # Keep original if no mapping found
+            mapped_ids.append(protein_id)
+            unmapped_count += 1
+    
+    if unmapped_count > 0:
+        print(f"  Warning: {unmapped_count}/{len(protein_ids)} protein IDs could not be mapped")
+    
+    return mapped_ids
+
 def load_label_network(label_network_file, labels_num):
     """Load label network or create identity matrix"""
     try:
@@ -69,55 +155,59 @@ def load_label_network(label_network_file, labels_num):
         print(f"  Creating identity matrix for {labels_num} labels")
         return torch.eye(labels_num, dtype=torch.float32)
 
-def combine_predictions(bp_preds, mf_preds, cc_preds, protein_ids, output_dir, threshold=0.5, min_confidence=0.1):
-    """Combine predictions from all three ontologies in long format"""
+def combine_predictions(bp_preds, mf_preds, cc_preds, protein_ids, output_dir, go_mappings, threshold=0.5, min_confidence=0.1):
+    """Combine predictions from all three ontologies using real GO terms"""
     
-    # Create column names for each ontology
-    bp_cols = [f"BP_GO_{i:04d}" for i in range(bp_preds.shape[1])]
-    mf_cols = [f"MF_GO_{i:04d}" for i in range(mf_preds.shape[1])]
-    cc_cols = [f"CC_GO_{i:04d}" for i in range(cc_preds.shape[1])]
-    
-    # Create long format data
+    # Create long format data with real GO terms
     long_format_data = []
     
     # Process BP predictions
-    for i, protein_id in enumerate(protein_ids):
-        for j, go_term in enumerate(bp_cols):
-            confidence = bp_preds[i, j]
-            if confidence >= min_confidence:  # Only include predictions above minimum confidence
-                long_format_data.append({
-                    'protein_id': protein_id,
-                    'go_term': go_term,
-                    'ontology': 'BP',
-                    'confidence_score': confidence,
-                    'predicted': 1 if confidence >= threshold else 0
-                })
+    if 'BP' in go_mappings:
+        bp_terms = go_mappings['BP']['idx_to_term']
+        for i, protein_id in enumerate(protein_ids):
+            for j in range(bp_preds.shape[1]):
+                confidence = bp_preds[i, j]
+                if confidence >= min_confidence:
+                    go_term = bp_terms.get(j, f"BP_UNKNOWN_{j}")
+                    long_format_data.append({
+                        'protein_id': protein_id,
+                        'go_term': go_term,
+                        'ontology': 'BP',
+                        'confidence_score': confidence,
+                        'predicted': 1 if confidence >= threshold else 0
+                    })
     
     # Process MF predictions
-    for i, protein_id in enumerate(protein_ids):
-        for j, go_term in enumerate(mf_cols):
-            confidence = mf_preds[i, j]
-            if confidence >= min_confidence:
-                long_format_data.append({
-                    'protein_id': protein_id,
-                    'go_term': go_term,
-                    'ontology': 'MF',
-                    'confidence_score': confidence,
-                    'predicted': 1 if confidence >= threshold else 0
-                })
+    if 'MF' in go_mappings:
+        mf_terms = go_mappings['MF']['idx_to_term']
+        for i, protein_id in enumerate(protein_ids):
+            for j in range(mf_preds.shape[1]):
+                confidence = mf_preds[i, j]
+                if confidence >= min_confidence:
+                    go_term = mf_terms.get(j, f"MF_UNKNOWN_{j}")
+                    long_format_data.append({
+                        'protein_id': protein_id,
+                        'go_term': go_term,
+                        'ontology': 'MF',
+                        'confidence_score': confidence,
+                        'predicted': 1 if confidence >= threshold else 0
+                    })
     
     # Process CC predictions
-    for i, protein_id in enumerate(protein_ids):
-        for j, go_term in enumerate(cc_cols):
-            confidence = cc_preds[i, j]
-            if confidence >= min_confidence:
-                long_format_data.append({
-                    'protein_id': protein_id,
-                    'go_term': go_term,
-                    'ontology': 'CC',
-                    'confidence_score': confidence,
-                    'predicted': 1 if confidence >= threshold else 0
-                })
+    if 'CC' in go_mappings:
+        cc_terms = go_mappings['CC']['idx_to_term']
+        for i, protein_id in enumerate(protein_ids):
+            for j in range(cc_preds.shape[1]):
+                confidence = cc_preds[i, j]
+                if confidence >= min_confidence:
+                    go_term = cc_terms.get(j, f"CC_UNKNOWN_{j}")
+                    long_format_data.append({
+                        'protein_id': protein_id,
+                        'go_term': go_term,
+                        'ontology': 'CC',
+                        'confidence_score': confidence,
+                        'predicted': 1 if confidence >= threshold else 0
+                    })
     
     # Create DataFrame in long format
     long_df = pd.DataFrame(long_format_data)
@@ -142,23 +232,17 @@ def combine_predictions(bp_preds, mf_preds, cc_preds, protein_ids, output_dir, t
     high_conf_df.to_csv(high_conf_output, index=False)
     print(f"Saved high confidence predictions (>= {threshold}) to {high_conf_output}")
     
-    # Also save traditional wide format for compatibility
-    bp_df = pd.DataFrame(bp_preds, columns=bp_cols, index=protein_ids)
-    mf_df = pd.DataFrame(mf_preds, columns=mf_cols, index=protein_ids)
-    cc_df = pd.DataFrame(cc_preds, columns=cc_cols, index=protein_ids)
-    
-    combined_df = pd.concat([bp_df, mf_df, cc_df], axis=1)
-    combined_df.index.name = 'protein_id'
-    
-    wide_output = output_dir / 'predictions_wide_format.csv'
-    combined_df.to_csv(wide_output)
-    print(f"Saved wide format predictions to {wide_output}")
-    
     # Create summary statistics
     summary_stats = {
         'ontology': ['BP', 'MF', 'CC', 'Total'],
-        'num_terms': [bp_preds.shape[1], mf_preds.shape[1], cc_preds.shape[1], 
-                     bp_preds.shape[1] + mf_preds.shape[1] + cc_preds.shape[1]],
+        'num_terms': [
+            len(go_mappings.get('BP', {}).get('terms', [])),
+            len(go_mappings.get('MF', {}).get('terms', [])),
+            len(go_mappings.get('CC', {}).get('terms', [])),
+            len(go_mappings.get('BP', {}).get('terms', [])) + 
+            len(go_mappings.get('MF', {}).get('terms', [])) + 
+            len(go_mappings.get('CC', {}).get('terms', []))
+        ],
         'total_predictions': [
             len(long_df[long_df['ontology'] == 'BP']),
             len(long_df[long_df['ontology'] == 'MF']),
@@ -172,9 +256,9 @@ def combine_predictions(bp_preds, mf_preds, cc_preds, protein_ids, output_dir, t
             len(high_conf_df)
         ],
         'avg_confidence': [
-            long_df[long_df['ontology'] == 'BP']['confidence_score'].mean(),
-            long_df[long_df['ontology'] == 'MF']['confidence_score'].mean(),
-            long_df[long_df['ontology'] == 'CC']['confidence_score'].mean(),
+            long_df[long_df['ontology'] == 'BP']['confidence_score'].mean() if len(long_df[long_df['ontology'] == 'BP']) > 0 else 0,
+            long_df[long_df['ontology'] == 'MF']['confidence_score'].mean() if len(long_df[long_df['ontology'] == 'MF']) > 0 else 0,
+            long_df[long_df['ontology'] == 'CC']['confidence_score'].mean() if len(long_df[long_df['ontology'] == 'CC']) > 0 else 0,
             long_df['confidence_score'].mean()
         ]
     }
@@ -196,19 +280,22 @@ def combine_predictions(bp_preds, mf_preds, cc_preds, protein_ids, output_dir, t
     print(f"  MF: {len(long_df[long_df['ontology'] == 'MF'])} predictions ({len(high_conf_df[high_conf_df['ontology'] == 'MF'])} high confidence)")
     print(f"  CC: {len(long_df[long_df['ontology'] == 'CC'])} predictions ({len(high_conf_df[high_conf_df['ontology'] == 'CC'])} high confidence)")
     print(f"\nAverage confidence scores:")
-    print(f"  BP: {long_df[long_df['ontology'] == 'BP']['confidence_score'].mean():.3f}")
-    print(f"  MF: {long_df[long_df['ontology'] == 'MF']['confidence_score'].mean():.3f}")
-    print(f"  CC: {long_df[long_df['ontology'] == 'CC']['confidence_score'].mean():.3f}")
+    if len(long_df[long_df['ontology'] == 'BP']) > 0:
+        print(f"  BP: {long_df[long_df['ontology'] == 'BP']['confidence_score'].mean():.3f}")
+    if len(long_df[long_df['ontology'] == 'MF']) > 0:
+        print(f"  MF: {long_df[long_df['ontology'] == 'MF']['confidence_score'].mean():.3f}")
+    if len(long_df[long_df['ontology'] == 'CC']) > 0:
+        print(f"  CC: {long_df[long_df['ontology'] == 'CC']['confidence_score'].mean():.3f}")
     print(f"  Overall: {long_df['confidence_score'].mean():.3f}")
     
     return long_df, high_conf_df
 
 def main():
     parser = argparse.ArgumentParser(description='Multi-ontology Struct2GO prediction')
-    parser.add_argument('--graphs_file', required=True, help='Path to protein graphs')
-    parser.add_argument('--node_features_file', required=True, help='Path to 56-dim node features')
-    parser.add_argument('--sequence_features_file', required=True, help='Path to 1024-dim sequence features')
+    parser.add_argument('--processed_data_dir', required=True, help='Directory with processed data (including label networks)')
     parser.add_argument('--models_dir', required=True, help='Directory containing the three model files')
+    parser.add_argument('--source_data_dir', required=True, help='Directory containing GO term mappings (gos_bp.csv, etc.)')
+    parser.add_argument('--idmapping_file', help='Path to idmapping_uni.txt file (optional)')
     parser.add_argument('--output_dir', required=True, help='Output directory')
     parser.add_argument('--min_confidence', type=float, default=0.1, help='Minimum confidence to include in output')
     parser.add_argument('--threshold', type=float, default=0.5, help='Threshold for binary predictions')
@@ -218,24 +305,33 @@ def main():
     
     models_dir = Path(args.models_dir)
     output_dir = Path(args.output_dir)
+    source_data_dir = Path(args.source_data_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Load GO term mappings
+    go_mappings = load_go_mappings(source_data_dir)
+    
+    # Load protein ID mappings if provided
+    id_mapping = {}
+    if args.idmapping_file and Path(args.idmapping_file).exists():
+        id_mapping = load_protein_id_mapping(args.idmapping_file)
     
     # Define model configurations
     model_configs = {
         'BP': {
             'model_file': 'mymodel_bp_1_0.0005_0.45.pkl',
             'labels_num': 809,
-            'label_network': None  # Will use identity matrix
+            'label_network_file': processed_data_dir / 'label_bp_network.pkl'
         },
         'MF': {
             'model_file': 'mymodel_mf_1_0.0005_0.45.pkl', 
             'labels_num': 273,
-            'label_network': None
+            'label_network_file': processed_data_dir / 'label_mf_network.pkl'
         },
         'CC': {
             'model_file': 'mymodel_cc_1_0.0005_0.45.pkl',
             'labels_num': 298,
-            'label_network': None
+            'label_network_file': processed_data_dir / 'label_cc_network.pkl'
         }
     }
     
@@ -286,13 +382,20 @@ def main():
             model = torch.load(model_path, map_location=args.device)
             model.to(args.device)
             model.eval()
+            
+            # Fix missing label_network1 attribute if needed
+            if not hasattr(model, 'label_network1'):
+                print(f"  Adding missing label_network1 to {ontology} model...")
+                from dgl.nn.pytorch.conv import GATConv
+                model.label_network1 = GATConv(1, 1, num_heads=8, allow_zero_in_degree=True).to(args.device)
+            
             print(f"  Model loaded successfully")
         except Exception as e:
             print(f"  Error loading model: {e}")
             continue
         
         # Load/create label network
-        label_network = load_label_network(config['label_network'], config['labels_num'])
+        label_network = load_label_network(config['label_network_file'], config['labels_num'])
         
         # Run predictions
         predictions, protein_ids = predict_ontology(
@@ -302,6 +405,9 @@ def main():
         
         all_predictions[ontology] = predictions
         print(f"  {ontology} predictions completed: {predictions.shape}")
+    
+    # Use mapped protein IDs for final output
+    final_protein_ids = mapped_protein_ids if id_mapping else protein_ids
     
     # Combine all predictions
     if len(all_predictions) == 3:
@@ -313,8 +419,9 @@ def main():
             all_predictions['BP'],
             all_predictions['MF'], 
             all_predictions['CC'],
-            protein_ids,
+            final_protein_ids,
             output_dir,
+            go_mappings,
             args.threshold,
             args.min_confidence
         )
