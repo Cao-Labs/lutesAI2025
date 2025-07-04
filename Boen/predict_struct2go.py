@@ -40,7 +40,7 @@ def predict_ontology(model, graphs, node_features, sequence_features, label_netw
                 batched_graph = dgl.batch([graph])
                 batched_sequence_feature = sequence_feature.unsqueeze(0)
                 
-                # Model prediction - the model expects (graph, sequence_feature, label_network)
+                # Model prediction
                 logits = model(batched_graph, batched_sequence_feature, label_network.to(device))
                 predictions = torch.sigmoid(logits)
                 
@@ -57,6 +57,17 @@ def predict_ontology(model, graphs, node_features, sequence_features, label_netw
                 continue
     
     return np.vstack(all_predictions), protein_ids
+
+def load_label_network(label_network_file, labels_num):
+    """Load label network or create identity matrix"""
+    try:
+        with open(label_network_file, 'rb') as f:
+            label_network = pickle.load(f)
+        print(f"  Loaded label network from {label_network_file}")
+        return label_network
+    except:
+        print(f"  Creating identity matrix for {labels_num} labels")
+        return torch.eye(labels_num, dtype=torch.float32)
 
 def load_go_mappings(source_data_dir):
     """Load GO term mappings from the source data files"""
@@ -143,17 +154,6 @@ def map_protein_ids(protein_ids, id_mapping):
         print(f"  Warning: {unmapped_count}/{len(protein_ids)} protein IDs could not be mapped")
     
     return mapped_ids
-
-def load_label_network(label_network_file, labels_num):
-    """Load label network or create identity matrix"""
-    try:
-        with open(label_network_file, 'rb') as f:
-            label_network = pickle.load(f)
-        print(f"  Loaded label network from {label_network_file}")
-        return label_network
-    except:
-        print(f"  Creating identity matrix for {labels_num} labels")
-        return torch.eye(labels_num, dtype=torch.float32)
 
 def combine_predictions(bp_preds, mf_preds, cc_preds, protein_ids, output_dir, go_mappings, threshold=0.5, min_confidence=0.1):
     """Combine predictions from all three ontologies using real GO terms"""
@@ -304,19 +304,12 @@ def main():
     args = parser.parse_args()
     
     models_dir = Path(args.models_dir)
+    processed_data_dir = Path(args.processed_data_dir)
     output_dir = Path(args.output_dir)
     source_data_dir = Path(args.source_data_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Load GO term mappings
-    go_mappings = load_go_mappings(source_data_dir)
-    
-    # Load protein ID mappings if provided
-    id_mapping = {}
-    if args.idmapping_file and Path(args.idmapping_file).exists():
-        id_mapping = load_protein_id_mapping(args.idmapping_file)
-    
-    # Define model configurations
+    # Define model configurations (after processed_data_dir is defined)
     model_configs = {
         'BP': {
             'model_file': 'mymodel_bp_1_0.0005_0.45.pkl',
@@ -335,22 +328,43 @@ def main():
         }
     }
     
+    # Load GO term mappings
+    go_mappings = load_go_mappings(source_data_dir)
+    
+    # Load protein ID mappings if provided
+    id_mapping = {}
+    if args.idmapping_file and Path(args.idmapping_file).exists():
+        id_mapping = load_protein_id_mapping(args.idmapping_file)
+    
     print("Loading data files...")
     
-    # Load graphs
-    with open(args.graphs_file, 'rb') as f:
+    # Load graphs from processed data directory
+    graphs_file = processed_data_dir / 'emb_graph_test.pkl'
+    with open(graphs_file, 'rb') as f:
         graphs = pickle.load(f)
     print(f"Loaded {len(graphs)} protein graphs")
     
     # Load node features
-    with open(args.node_features_file, 'rb') as f:
+    node_features_file = processed_data_dir / 'protein_node2onehot.pkl'
+    with open(node_features_file, 'rb') as f:
         node_features = pickle.load(f)
     print(f"Loaded node features for {len(node_features)} proteins")
     
     # Load sequence features
-    with open(args.sequence_features_file, 'rb') as f:
+    sequence_features_file = processed_data_dir / 'dict_sequence_feature.pkl'
+    with open(sequence_features_file, 'rb') as f:
         sequence_features = pickle.load(f)
     print(f"Loaded sequence features for {len(sequence_features)} proteins")
+    
+    # Get protein IDs and map them if needed
+    original_protein_ids = list(graphs.keys())
+    if id_mapping:
+        print("Mapping protein IDs...")
+        mapped_protein_ids = map_protein_ids(original_protein_ids, id_mapping)
+        print(f"  Original IDs (sample): {original_protein_ids[:5]}")
+        print(f"  Mapped IDs (sample): {mapped_protein_ids[:5]}")
+    else:
+        mapped_protein_ids = original_protein_ids
     
     # Verify data consistency
     common_proteins = set(graphs.keys()) & set(node_features.keys()) & set(sequence_features.keys())
@@ -431,7 +445,6 @@ def main():
         print("  - predictions_simple.csv (protein_id - go_term - confidence_score)")
         print("  - predictions_long_format.csv (includes ontology and binary prediction)")
         print("  - predictions_high_confidence.csv (only high confidence predictions)")
-        print("  - predictions_wide_format.csv (traditional matrix format)")
         print("  - prediction_summary.csv (summary statistics)")
         
     else:
