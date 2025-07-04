@@ -52,7 +52,14 @@ def predict_ontology(model, graphs, node_features, sequence_features, label_netw
             except Exception as e:
                 print(f"  Error processing protein {protein_id}: {e}")
                 # Add dummy prediction to maintain order
-                dummy_pred = np.zeros((1, label_network.shape[0]))
+                if hasattr(label_network, 'number_of_nodes'):
+                    num_labels = label_network.number_of_nodes()
+                elif hasattr(label_network, 'shape'):
+                    num_labels = label_network.shape[0]
+                else:
+                    num_labels = config['labels_num']  # Fallback to config
+                
+                dummy_pred = np.zeros((1, num_labels))
                 all_predictions.append(dummy_pred)
                 continue
     
@@ -309,7 +316,7 @@ def main():
     source_data_dir = Path(args.source_data_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Define model configurations (after processed_data_dir is defined)
+    # Define model configurations with correct label counts
     model_configs = {
         'BP': {
             'model_file': 'mymodel_bp_1_0.0005_0.45.pkl',
@@ -411,14 +418,30 @@ def main():
         # Load/create label network
         label_network = load_label_network(config['label_network_file'], config['labels_num'])
         
-        # Run predictions
-        predictions, protein_ids = predict_ontology(
-            model, graphs, node_features, sequence_features, 
-            label_network, args.device, ontology
-        )
+        # Debug: Print label network info
+        if hasattr(label_network, 'number_of_nodes'):
+            print(f"  Label network nodes: {label_network.number_of_nodes()}")
+        elif hasattr(label_network, 'shape'):
+            print(f"  Label network shape: {label_network.shape}")
+        else:
+            print(f"  Label network type: {type(label_network)}")
         
-        all_predictions[ontology] = predictions
-        print(f"  {ontology} predictions completed: {predictions.shape}")
+        print(f"  Expected labels: {config['labels_num']}")
+        
+        # Run predictions with error handling
+        try:
+            predictions, protein_ids = predict_ontology(
+                model, graphs, node_features, sequence_features, 
+                label_network, args.device, ontology
+            )
+            
+            all_predictions[ontology] = predictions
+            print(f"  {ontology} predictions completed: {predictions.shape}")
+            
+        except Exception as e:
+            print(f"  ERROR in {ontology} predictions: {e}")
+            print(f"  Skipping {ontology} ontology...")
+            continue
     
     # Use mapped protein IDs for final output
     final_protein_ids = mapped_protein_ids if id_mapping else protein_ids
