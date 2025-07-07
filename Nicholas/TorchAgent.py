@@ -67,7 +67,7 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
     if not os.path.exists(training_log_path):
         with open(training_log_path, mode='w', newline='', encoding='utf-8-sig') as f:
             writer = csv.writer(f)
-            writer.writerow(['episode', 'reward', 'selected_amount', 'percent_correct','precision','recall','selected_go' 'time'])
+            writer.writerow(['episode', 'reward', 'selected_amount', 'percent_correct','time'])
 
     for episode in range(episodes):
         obs = env.reset()
@@ -110,7 +110,7 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
         #Log Episode
         with open(os.path.join(SAVE_DIR,whenRan,training_log), mode='a', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow([episode, reward, num_selected_terms,percent_correct,precision,selected_go,recall,time.time() - startTime])
+            writer.writerow([episode, reward, num_selected_terms,percent_correct,time.time() - startTime])
         # if episode > 0 and episode % Reset_Interval == 0:
         #     reward_sum = 0.0
         #     reward_sq_sum = 0.0
