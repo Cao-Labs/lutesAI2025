@@ -67,7 +67,7 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
     if not os.path.exists(training_log_path):
         with open(training_log_path, mode='w', newline='', encoding='utf-8-sig') as f:
             writer = csv.writer(f)
-            writer.writerow(['episode', 'reward', 'selected_amount', 'percent_correct', 'time'])
+            writer.writerow(['episode', 'reward', 'selected_amount', 'percent_correct',' precision','recall','selected_go' 'time'])
 
     for episode in range(episodes):
         obs = env.reset()
@@ -82,40 +82,44 @@ def train(env, policy, optimizer, episodes=500, eval_log='eval_log.csv', trainin
         num_selected_terms = int(np.sum(action_np))  # Total GO terms selected
         _, reward, _, info = env.step(action_np)
         percent_correct = info.get("percent_correct", 0.0)
+        precision = info.get("precision", 0.0)
+        recall = info.get("recall", 0.0)
+        select = info.get("selected_go", 0.0)
+        selected_go = ",".join(select)
 
-        # Update running stats
-        reward_sum += reward
-        reward_sq_sum += reward ** 2
-        reward_count += 1
-
-        running_mean = reward_sum / reward_count
-        running_var = (reward_sq_sum / reward_count) - (running_mean ** 2)
-        running_std = running_var ** 0.5
-
-        # Normalize reward
-        normalized_reward = (reward - running_mean) / (running_std + epsilon)
-
-        # REINFORCE loss using normalized reward advantage
-        baseline = 0.9 * baseline + 0.1 * normalized_reward  # baseline updated with normalized reward
-        advantage = normalized_reward - baseline
+        # Update running stats useless for now
+        # reward_sum += reward
+        # reward_sq_sum += reward ** 2
+        # reward_count += 1
+        #
+        # running_mean = reward_sum / reward_count
+        # running_var = (reward_sq_sum / reward_count) - (running_mean ** 2)
+        # running_std = running_var ** 0.5
+        #
+        # # Normalize reward
+        # normalized_reward = (reward - running_mean) / (running_std + epsilon)
+        #
+        # # REINFORCE loss using normalized reward advantage
+        # baseline = 0.9 * baseline + 0.1 * normalized_reward  # baseline updated with normalized reward
+        advantage = reward
         loss = -advantage * log_probs.sum()
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-
+        #Log Episode
         with open(os.path.join(SAVE_DIR,whenRan,training_log), mode='a', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow([episode, reward, num_selected_terms,percent_correct,time.time() - startTime])
-        if episode > 0 and episode % Reset_Interval == 0:
-            reward_sum = 0.0
-            reward_sq_sum = 0.0
-            reward_count = 0
-            print(f"🔄 Reset running stats at episode {episode}")
+            writer.writerow([episode, reward, num_selected_terms,percent_correct,precision,selected_go,recall,time.time() - startTime])
+        # if episode > 0 and episode % Reset_Interval == 0:
+        #     reward_sum = 0.0
+        #     reward_sq_sum = 0.0
+        #     reward_count = 0
+        #     print(f"🔄 Reset running stats at episode {episode}")
 
         if episode % 250 == 0:
             print(
-                f"\n🎯 Episode {episode}: Reward = {reward:.2f}, Normalized Reward = {normalized_reward:.3f}, Baseline = {baseline:.3f}")
+                f"\n🎯 Episode {episode}: Reward = {reward:.2f}, Baseline = {baseline:.3f}")
             avg_reward, best_avg_reward, avg_percent = evaluate(policy, env, episodes=10, episode_idx=episode,
                                                    best_avg_reward=best_avg_reward)
             checkpoint_path = os.path.join(CHECKPOINT_DIR, f"model_episode_{episode}.pt")

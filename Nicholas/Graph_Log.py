@@ -9,13 +9,14 @@ def graphit(Training_Path, Eval_Path, Graph_Path):
 
     # Create directory if it doesn't exist
     os.makedirs(Graph_Path, exist_ok=True)
+    N = max(1, int(df['episode'].max() / 500))
+    df_sampled = df[df['episode'] % N == 0]
 
     # 1. Plot: Training reward + selected_amount
     plt.figure(figsize=(10, 5))
-    plt.plot(df['episode'], df['selected_amount'], label='Selected', alpha=0.7)
+    plt.plot(df_sampled['episode'], df_sampled['selected_amount'], label='Selected', alpha=0.7)
 
     # Sample every 10,000th point for overlay
-    # df_sampled = df[df['episode'] % 10000 == 0]
     plt.xlabel('Episode')
     plt.ylabel('Number of Answers')
     plt.title('Selected Amount')
@@ -27,13 +28,28 @@ def graphit(Training_Path, Eval_Path, Graph_Path):
 
     # 2. Plot: Training reward only
     plt.figure(figsize=(10, 5))
-    plt.plot(df['episode'], df['reward'], label='Reward', alpha=0.7)
+
+    plt.plot(df_sampled['episode'], df_sampled['reward'], label='F1/Reward', alpha=0.7)
     plt.xlabel('Episode')
-    plt.ylabel('Reward')
+    plt.ylabel('F1/Reward')
     plt.title('Training Reward')
     plt.grid(True)
     plt.tight_layout()
     plt.savefig(os.path.join(Graph_Path, "training.png"))
+    plt.close()
+
+    # Recall and Precision
+    plt.figure(figsize=(10, 5))
+    plt.plot(df_sampled['episode'], df_sampled['reward'], label='F1/Reward', alpha=0.7, color = "blue")
+    plt.plot(df_sampled['episode'], df_sampled['precision'], label='precision', alpha=0.7, color = "red")
+    plt.plot(df_sampled['episode'], df_sampled['recall'], label='recall', alpha=0.7, color = "green")
+
+    plt.xlabel("Episode")
+    plt.ylabel("Score")
+    plt.title("F1/Precision/Recall Over Training")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(os.path.join(Graph_Path, "overview.png"))
     plt.close()
 
     # 3. Plot: Evaluation data

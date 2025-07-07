@@ -149,7 +149,8 @@ class GOEnv(gym.Env):
         return {
             "sequence": self.current_sequence,
             "go_candidates": self.current_go_choices
-        }, reward, done, {"percent_correct": percent_correct}
+        }, reward, done, {"percent_correct": percent_correct, "precision": precision,
+                          "recall": recall, "selected_go": selected_terms}
 
 
 protein_data_for_env = {
