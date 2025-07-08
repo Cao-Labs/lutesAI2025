@@ -13,7 +13,7 @@ def graphit(Training_Path, Eval_Path, Graph_Path):
     df_sampled = df[df['episode'] % N == 0]
 
     # 1. Plot: Training reward + selected_amount
-    plt.figure(figsize=(10, 5))
+    plt.figure(figsize=(12, 6), constrained_layout=True)
     plt.plot(df_sampled['episode'], df_sampled['selected_amount'], label='Selected', alpha=0.7)
 
     # Sample every 10,000th point for overlay
@@ -22,24 +22,22 @@ def graphit(Training_Path, Eval_Path, Graph_Path):
     plt.title('Selected Amount')
     plt.legend()
     plt.grid(True)
-    plt.tight_layout()
     plt.savefig(os.path.join(Graph_Path, "selected.png"))
     plt.close()
 
     # 2. Plot: Training reward only
-    plt.figure(figsize=(10, 5))
+    plt.figure(figsize=(12, 6), constrained_layout=True)
 
     plt.plot(df_sampled['episode'], df_sampled['reward'], label='F1/Reward', alpha=0.7)
     plt.xlabel('Episode')
     plt.ylabel('F1/Reward')
     plt.title('Training Reward')
     plt.grid(True)
-    plt.tight_layout()
     plt.savefig(os.path.join(Graph_Path, "training.png"))
     plt.close()
 
     # Recall and Precision
-    plt.figure(figsize=(10, 5))
+    plt.figure(figsize=(12, 6), constrained_layout=True)
     plt.plot(df_sampled['episode'], df_sampled['reward'], label='F1/Reward', alpha=0.7, color = "blue")
     plt.plot(df_sampled['episode'], df_sampled['precision'], label='precision', alpha=0.7, color = "red")
     plt.plot(df_sampled['episode'], df_sampled['recall'], label='recall', alpha=0.7, color = "green")
@@ -48,7 +46,6 @@ def graphit(Training_Path, Eval_Path, Graph_Path):
     plt.ylabel("Score")
     plt.title("F1/Precision/Recall Over Training")
     plt.grid(True)
-    plt.tight_layout()
     plt.savefig(os.path.join(Graph_Path, "overview.png"))
     plt.close()
 
