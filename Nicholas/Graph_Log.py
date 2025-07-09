@@ -12,7 +12,7 @@ def graphit(Training_Path, Eval_Path, Graph_Path):
     os.makedirs(Graph_Path, exist_ok=True)
     N = max(1, int(df['episode'].max() / 500))
     df_sampled = df[df['episode'] % N == 0]
-
+    df_sampled  = df
     # 1. Plot: Training reward + selected_amount
     plt.plot(df_sampled['episode'], df_sampled['selected_amount'], label='Selected', alpha=0.7)
 
