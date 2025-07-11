@@ -27,12 +27,12 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # --------- 1. Define the PyTorch Policy Network ---------
 class PolicyNetwork(nn.Module):
-    def __init__(self, input_size=512, hidden_size=256, output_size=100):
+    def __init__(self, input_size=1300, hidden_size=256, output_size=100):
         super(PolicyNetwork, self).__init__()
         self.model = nn.Sequential(
             nn.Embedding(22, 32),           # Encode 22 amino acids to vectors
             nn.Flatten(),                   # (512, 32) → (512*32)
-            nn.Linear(512 * 32, hidden_size),
+            nn.Linear(input_size * 32, hidden_size),
             nn.ReLU(),
             nn.Linear(hidden_size, output_size),
             nn.Sigmoid()  # Since output is a binary vector
@@ -164,7 +164,7 @@ def evaluate(policy, env, episodes=20, episode_idx=0, best_avg_reward=None):
 # --------- 3. Run Everything ---------
 if __name__ == "__main__":
     env = GOEnv(protein_data=protein_data_for_env, go_terms=all_go_terms)
-    policy = PolicyNetwork(input_size=512, output_size=env.max_choices).to(device)
+    policy = PolicyNetwork(input_size=1300, output_size=env.max_choices).to(device)
     optimizer = optim.Adam(policy.parameters(), lr=1e-4)
 
     train(env, policy, optimizer, episodes=500000)

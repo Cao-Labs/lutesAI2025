@@ -61,7 +61,7 @@ print(sequence)
 
 
 class GOEnv(gym.Env):
-    def __init__(self, protein_data, go_terms, max_choices=100, seq_length=512):
+    def __init__(self, protein_data, go_terms, max_choices=100, seq_length=1300):
         super(GOEnv, self).__init__()
         self.protein_data = protein_data  # {protein_id: (sequence, [GO terms])}
         self.go_terms = go_terms  # list of all possible GO terms
