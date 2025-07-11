@@ -12,9 +12,9 @@ def graphit(Training_Path, Eval_Path, Graph_Path):
     print(last_row)
     # Create directory if it doesn't exist
     os.makedirs(Graph_Path, exist_ok=True)
-    #N = max(1, int(df['episode'].max() / 500))
-   # df_sampled = df[df['episode'] % N == 0]
-    df_sampled  = df
+    N = max(1, int(df['episode'].max() / 500))
+    df_sampled = df[df['episode'] % N == 0]
+    # df_sampled  = df
     # 1. Plot: Training reward + selected_amount
     plt.plot(df_sampled['episode'], df_sampled['selected_amount'], label='Selected', alpha=0.7)
 
@@ -48,6 +48,7 @@ def graphit(Training_Path, Eval_Path, Graph_Path):
     plt.ylabel("Score")
     plt.title("F1/Precision/Recall Over Training")
     plt.grid(True)
+    plt.legend()
     plt.savefig(os.path.join(Graph_Path, "overview.png"))
     plt.close()
 
