@@ -1,7 +1,19 @@
 # run_blip2.py
 
-import argparse
 import sys
+print("="*80)
+print(f"Python executable: {sys.executable}")
+print(f"Python version: {sys.version}")
+print(f"Python path: {sys.path}")
+print(f"Command line args: {sys.argv}")
+print("="*80)
+
+import os
+print(f"Current working directory: {os.getcwd()}")
+print(f"Directory contents: {os.listdir('.')}")
+print("="*80)
+
+import argparse
 from pathlib import Path
 
 # Set up command line arguments first, before any other imports
