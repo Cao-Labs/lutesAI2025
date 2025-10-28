@@ -23,11 +23,14 @@ model, vis_processors, _ = load_model_and_preprocess(
 )
 
 # Load protein image generated from ESM-3
-image_path = Path(args.image)
+print(f"Debug - Received image path argument: {args.image}")
+image_path = Path(args.image).resolve()
+print(f"Debug - Resolved image path: {image_path}")
 if not image_path.exists():
     raise FileNotFoundError(f"Image file not found: {image_path}")
 
-raw_image = Image.open(image_path).convert("RGB")
+print(f"Debug - Attempting to open image at: {image_path}")
+raw_image = Image.open(str(image_path)).convert("RGB")
 
 # Preprocess and move image to device
 image = vis_processors["eval"](raw_image).unsqueeze(0).to(device)
