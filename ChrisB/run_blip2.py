@@ -1,9 +1,10 @@
-# run_blip2.py (fixed)
+# run_blip2.py (with debug)
 
 from PIL import Image
 import torch
 import argparse
 from lavis.models import load_model_and_preprocess
+import os
 
 # -----------------------------
 # Command-line argument parsing
@@ -12,6 +13,17 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--image", type=str, required=True, help="Path to input image")
 args = parser.parse_args()
 image_path = args.image
+
+# -----------------------------
+# DEBUG: Check which image path is being used
+# -----------------------------
+print("DEBUG: image_path =", image_path)
+
+# -----------------------------
+# Check if file exists
+# -----------------------------
+if not os.path.isfile(image_path):
+    raise FileNotFoundError(f"Image file not found at: {image_path}")
 
 # -----------------------------
 # Choose device
