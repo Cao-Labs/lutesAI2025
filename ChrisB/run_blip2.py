@@ -5,8 +5,9 @@ from lavis.models import load_model_and_preprocess
 
 def main():
     parser = argparse.ArgumentParser(description="Run BLIP-2 on an image")
-    parser.add_argument("--image", type=str, required=True,
-                        help="Path to the input image")
+    parser.add_argument(
+        "--image", type=str, required=True, help="Path to the input image"
+    )
     args = parser.parse_args()
 
     image_path = args.image
@@ -20,13 +21,16 @@ def main():
 
     # Load BLIP-2 model
     model, vis_processors, _ = load_model_and_preprocess(
-        model_name="blip2_t5", model_type="pretrain_flant5xl", is_eval=True
+        model_name="blip2_t5",
+        model_type="pretrain_flant5xl",
+        is_eval=True
     )
 
-    image = vis_processors["eval"](raw_image).unsqueeze(0)
+    # Preprocess the image
+    image_tensor = vis_processors["eval"](raw_image).unsqueeze(0)
 
     # Generate caption
-    caption = model.generate({"image": image})
+    caption = model.generate({"image": image_tensor})
     print("Caption:", caption[0])
 
 if __name__ == "__main__":
