@@ -65,22 +65,29 @@ model, vis_processors, _ = load_model_and_preprocess(
     device=device
 )
 
-# Load protein image generated from ESM-3
-print(f"Debug - Command line arguments: {sys.argv}")
-print(f"Debug - Parsed args: {args}")
-print(f"Debug - Current working directory: {Path.cwd()}")
-print(f"Debug - Received image path argument: {args.image}")
+# Verify the image exists before proceeding
+print("\nVerifying command line argument...")
+print(f"Command line args: {sys.argv}")
+print(f"Parsed args: {args}")
 
+if not args.image:
+    print("No image path provided")
+    sys.exit(1)
+
+verify_file(args.image)
+
+# Try to load the image
 try:
     image_path = Path(args.image).resolve()
-    print(f"Debug - Resolved image path: {image_path}")
-    print(f"Debug - Path exists check: {image_path.exists()}")
+    print(f"\nAttempting to open image at: {image_path}")
     
-    if not image_path.exists():
-        raise FileNotFoundError(f"Image file not found: {image_path}")
+    # Try direct file access first
+    with open(image_path, 'rb') as f:
+        print("File opened successfully with built-in open()")
     
-    print(f"Debug - Attempting to open image at: {image_path}")
+    # Now try with PIL
     raw_image = Image.open(str(image_path)).convert("RGB")
+    print(f"Image opened with PIL, size: {raw_image.size}")
 except Exception as e:
     print(f"Error details: {str(e)}")
     sys.exit(1)
