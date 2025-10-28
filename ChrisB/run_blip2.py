@@ -1,7 +1,29 @@
 # run_blip2.py
 
 import sys
-print("="*80)
+import os
+from pathlib import Path
+
+def verify_file(path):
+    abs_path = os.path.abspath(path)
+    print(f"\nFile verification for: {path}")
+    print(f"1. Absolute path: {abs_path}")
+    print(f"2. Path exists (os.path): {os.path.exists(abs_path)}")
+    
+    p = Path(path)
+    print(f"3. Path object: {p}")
+    print(f"4. Resolved path: {p.resolve()}")
+    print(f"5. Path exists (pathlib): {p.exists()}")
+    
+    try:
+        if p.exists():
+            print(f"6. Is file: {p.is_file()}")
+            print(f"7. File size: {p.stat().st_size}")
+            with open(p, 'rb') as f:
+                print("8. File can be opened")
+    except Exception as e:
+        print(f"Error during verification: {e}")
+    print("="*50)
 print(f"Python executable: {sys.executable}")
 print(f"Python version: {sys.version}")
 print(f"Python path: {sys.path}")
