@@ -1,51 +1,36 @@
-import argparse
 from PIL import Image
-import torch
 from lavis.models import load_model_and_preprocess
+import torch
+import sys
 
-def main():
-    parser = argparse.ArgumentParser(description="Batch caption images using BLIP-2 (LAVIS)")
-    parser.add_argument(
-        "--images",
-        type=str,
-        nargs="+",
-        required=True,
-        help="Paths to one or more image files (space-separated)"
-    )
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="cuda",
-        help="Device to run on ('cuda' or 'cpu')"
-    )
-    args = parser.parse_args()
+# Use first command-line argument as image path
+if len(sys.argv) < 2:
+    print("Usage: python script.py <image_path>")
+    sys.exit(1)
 
-    # Load the model once
-    model, vis_processors, _ = load_model_and_preprocess(
-        name="blip2_t5",
-        model_type="pretrain_flant5xl",
-        device=args.device
-    )
+image_path = sys.argv[1]
 
-    for img_path in args.images:
-        print(f"\nProcessing: {img_path}")
-        try:
-            raw_image = Image.open(img_path).convert("RGB")
-        except FileNotFoundError:
-            print(f"Error: file not found -> {img_path}")
-            continue
-        except Exception as e:
-            print(f"Error loading image {img_path}: {e}")
-            continue
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # Preprocess the image
-        image_tensor = vis_processors["eval"](raw_image).unsqueeze(0).to(args.device)
+# Load BLIP-2 model
+model, vis_processors, _ = load_model_and_preprocess(
+    name="blip2_t5", model_type="pretrain_flant5xl", device=device
+)
 
-        # LAVIS expects the input dict key to be "image"
-        with torch.no_grad():
-            caption = model.generate({"image": image_tensor})
+# Load image
+try:
+    raw_image = Image.open(image_path).convert("RGB")
+except FileNotFoundError:
+    print(f"File not found: {image_path}")
+    sys.exit(1)
 
-        print(f"Caption: {caption[0]}")
+image_tensor = vis_processors["eval"](raw_image).unsqueeze(0).to(device)
 
-if __name__ == "__main__":
-    main()
+# Question/prompt
+question = "What is in this image?"
+
+# Generate caption
+with torch.no_grad():
+    answer = model.generate({"image": image_tensor, "prompt": question})
+
+print("Caption:", answer[0])
