@@ -1,66 +1,33 @@
-import os
-import torch
-import numpy as np
-import matplotlib.pyplot as plt
+#!/usr/bin/env python3
 import argparse
-from sklearn.metrics.pairwise import cosine_similarity
-from esm.models.esm3 import ESM3
-from esm.sdk.api import ESMProtein, SamplingConfig
-from esm.utils.constants.models import ESM3_OPEN_SMALL
-
-def load_esm3_model():
-    print("Loading ESM-3 model...")
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = ESM3.from_pretrained(ESM3_OPEN_SMALL, device=device)
-    model.eval().to(torch.float32)
-    return model
-
-def generate_embedding(model, sequence):
-    protein = ESMProtein(sequence=sequence)
-    sequence_tensor = model.encode(protein)
-
-    with torch.no_grad():
-        result = model.forward_and_sample(
-            sequence_tensor,
-            SamplingConfig(return_per_residue_embeddings=True)
-        )
-        embedding = result.per_residue_embedding
-        embedding = torch.nan_to_num(embedding, nan=0.0, posinf=0.0, neginf=0.0)
-    return embedding  # shape: (seq_len, embed_dim)
-
-def to_similarity_matrix(embedding):
-    # Convert to numpy and compute cosine similarity between residues
-    embedding_np = embedding.cpu().numpy()
-    sim_matrix = cosine_similarity(embedding_np)
-    return sim_matrix  # shape: (seq_len, seq_len)
-
-def normalize_matrix(matrix):
-    # Normalize to [0, 1] range for visualization
-    min_val, max_val = matrix.min(), matrix.max()
-    return (matrix - min_val) / (max_val - min_val + 1e-8)
-
-def save_image(matrix, output_path):
-    normalized = normalize_matrix(matrix)
-    plt.figure(figsize=(5, 4.5))
-    plt.imshow(normalized, cmap='viridis', vmin=0.0, vmax=1.0)
-    plt.title("Protein Feature Image (ESM-3 Cosine Similarity)")
-    plt.colorbar()
-    plt.axis('off')
-    plt.tight_layout()
-    plt.savefig(output_path, bbox_inches='tight')
-    plt.close()
-    print(f"[✓] Saved image: {output_path}")
+from PIL import Image
+from lavis.models import load_model_and_preprocess
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate protein feature similarity image from sequence.")
-    parser.add_argument("--sequence", type=str, required=True, help="Protein sequence in quotes")
-    parser.add_argument("--out", type=str, default="protein_image.png", help="Output image filename")
+    parser = argparse.ArgumentParser(description="Run BLIP-2 on an image")
+    parser.add_argument("--image", type=str, required=True,
+                        help="Path to the input image")
     args = parser.parse_args()
 
-    model = load_esm3_model()
-    embedding = generate_embedding(model, args.sequence)
-    matrix = to_similarity_matrix(embedding)
-    save_image(matrix, args.out)
+    image_path = args.image
+
+    # Load image
+    try:
+        raw_image = Image.open(image_path).convert("RGB")
+    except FileNotFoundError:
+        print(f"Error: image file not found: {image_path}")
+        return
+
+    # Load BLIP-2 model
+    model, vis_processors, _ = load_model_and_preprocess(
+        model_name="blip2_t5", model_type="pretrain_flant5xl", is_eval=True
+    )
+
+    image = vis_processors["eval"](raw_image).unsqueeze(0)
+
+    # Generate caption
+    caption = model.generate({"image": image})
+    print("Caption:", caption[0])
 
 if __name__ == "__main__":
     main()
