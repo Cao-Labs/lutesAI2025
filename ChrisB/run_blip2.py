@@ -7,7 +7,12 @@ from lavis.models import load_model_and_preprocess
 
 # --- Parse command line arguments ---
 parser = argparse.ArgumentParser(description="Generate a protein function description using BLIP-2.")
-parser.add_argument("--image", type=str, required=True, help="Path to the input protein image")
+parser.add_argument(
+    "--image",
+    type=str,
+    required=True,
+    help="Path to the input protein image"
+)
 args = parser.parse_args()
 image_path = args.image
 
