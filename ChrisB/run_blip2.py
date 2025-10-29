@@ -6,7 +6,9 @@ import torch
 from lavis.models import load_model_and_preprocess
 
 # --- Parse command line arguments ---
-parser = argparse.ArgumentParser(description="Generate a protein function description using BLIP-2.")
+parser = argparse.ArgumentParser(
+    description="Generate a protein function description using BLIP-2."
+)
 parser.add_argument(
     "--image",
     type=str,
@@ -14,7 +16,10 @@ parser.add_argument(
     help="Path to the input protein image"
 )
 args = parser.parse_args()
-image_path = args.image
+image_path = args.image  # <-- this ensures the command line input is used
+
+# --- Debug: confirm which file is being processed ---
+print("Using image:", image_path)
 
 # --- Choose device ---
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -28,7 +33,11 @@ model, vis_processors, _ = load_model_and_preprocess(
 )
 
 # --- Load and preprocess image ---
-raw_image = Image.open(image_path).convert("RGB")
+try:
+    raw_image = Image.open(image_path).convert("RGB")
+except FileNotFoundError:
+    raise FileNotFoundError(f"Cannot find image at {image_path}. Check the path!")
+
 image = vis_processors["eval"](raw_image).unsqueeze(0).to(device)
 
 # --- Generate caption ---
