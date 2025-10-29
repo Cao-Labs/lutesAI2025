@@ -1,7 +1,7 @@
 # === File paths ===
 pred_file = "/data/shared/github/lutesAI2025/naufal/testing_predictions.txt"
 true_file = "/data/summer2020/naufal/matched_ids_with_go.txt"
-output_file = "/data/shared/github/lutesAI2025/naufal/pred_vs_actual.txt"
+output_file = "/data/shared/github/lutesAI2025/naufal/actual_predicted.txt"
 
 # === Load actual GO annotations ===
 true_annots = {}
