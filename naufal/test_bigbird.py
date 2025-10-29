@@ -52,7 +52,7 @@ def test():
     embedding_dir = "/data/summer2020/naufal/testing_pca"
     vocab_path = "/data/shared/github/lutesAI2025/naufal/go_vocab.json"
     model_path = "/data/shared/github/lutesAI2025/naufal/bigbird_finetuned.pt"
-    output_file = "test_pred2.txt"
+    output_file = "testing_predictions.txt"
 
     print("[INFO] Loading GO vocabulary...")
     with open(vocab_path, "r") as f:
