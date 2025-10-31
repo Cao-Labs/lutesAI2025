@@ -2,15 +2,22 @@ import pandas as pd
 from sentence_transformers import SentenceTransformer, util
 import glob, os, re
 
+# Load the model once
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
 def similarity_score(desc1, desc2):
+    """Compute cosine similarity between two texts."""
     emb1 = model.encode(desc1, convert_to_tensor=True)
     emb2 = model.encode(desc2, convert_to_tensor=True)
     return util.cos_sim(emb1, emb2).item()
 
 def clean_id(protein_id):
-    """Normalize protein IDs: lowercase, strip spaces, remove dashes/underscores."""
+    """
+    Normalize protein IDs:
+    - lowercase
+    - strip spaces
+    - remove dashes and underscores
+    """
     return str(protein_id).strip().lower().replace("-", "").replace("_", "")
 
 if __name__ == "__main__":
@@ -51,7 +58,8 @@ if __name__ == "__main__":
         merged.to_csv("similarity_results.csv", index=False)
         print(f"✅ Done! {len(merged)} results saved to similarity_results.csv")
 
+    # 7️⃣ Print unmatched info
     if unmatched_captions:
-        print("⚠️ These generated caption IDs had no GO match:", unmatched_captions)
+        print(f"⚠️ These generated caption IDs had no GO match ({len(unmatched_captions)}): {unmatched_captions}")
     if unmatched_go:
-        print("⚠️ These GO IDs had no caption match:", unmatched_go)
+        print(f"⚠️ These GO IDs had no caption match ({len(unmatched_go)}): {unmatched_go}")
