@@ -43,3 +43,14 @@ image = vis_processors["eval"](raw_image).unsqueeze(0).to(device)
 # --- Generate caption ---
 caption = model.generate({"image": image})[0]
 print("🧬 Generated Protein Function Description:\n", caption)
+
+
+
+# --- Save output to a text file ---
+output_file = image_path.rsplit('.', 1)[0] + "_description.txt"
+with open(output_file, "w", encoding="utf-8") as f:
+    f.write("🧬 Generated Protein Function Description:\n")
+    f.write(caption + "\n")
+
+print(f"\n✅ Description saved to: {output_file}")
+
