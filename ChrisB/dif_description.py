@@ -1,5 +1,6 @@
 import pandas as pd
 from sentence_transformers import SentenceTransformer, util
+import glob
 
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
@@ -13,11 +14,19 @@ if __name__ == "__main__":
     # 1️⃣ Load GO references
     go_df = pd.read_csv("matched_ids_with_go.txt", sep="\t", header=None, names=["protein_id", "go_terms"])
 
-    # 2️⃣ Load generated captions (update filename accordingly)
-    captions_df = pd.read_csv("generated_captions.csv")  # assume columns: protein_id, generated_caption
+    # 2️⃣ Read all BLIP-2 text outputs
+    files = glob.glob("test_output*_description.txt")  # matches all batch files
+    data = []
+    for f in files:
+        protein_id = f.split("_")[2] if "_" in f else f.split(".")[0]  # extract protein id from filename
+        with open(f, "r") as file:
+            caption = file.read().strip()
+        data.append({"protein_id": protein_id, "generated_caption": caption})
 
-    # 3️⃣ Merge both on protein_id
-    merged = pd.merge(captions_df, go_df, on="protein_id")
+    captions_df = pd.DataFrame(data)
+
+    # 3️⃣ Merge GO references
+    merged = pd.merge(captions_df, go_df, on="protein_id", how="inner")
 
     # 4️⃣ Compute similarity
     similarities = []
