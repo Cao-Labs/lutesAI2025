@@ -2,7 +2,7 @@ import pandas as pd
 from sentence_transformers import SentenceTransformer, util
 import glob, os, re
 
-# ✅ Load sentence-transformers model (fixed dash issue)
+# Load sentence-transformers model
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
 def similarity_score(desc1, desc2):
@@ -20,7 +20,7 @@ if __name__ == "__main__":
     go_df = pd.read_csv("matched_ids_with_go.txt", sep="\t", header=None, names=["protein_id", "go_terms"])
     go_df["protein_id"] = go_df["protein_id"].apply(clean_id)
 
-    # 2️⃣ Read all generated captions (from BLIP-2 outputs)
+    # 2️⃣ Read all generated captions
     files = glob.glob("test_output*_description.txt")
     data = []
     for f in files:
@@ -36,10 +36,7 @@ if __name__ == "__main__":
     # 3️⃣ Merge GO references with generated captions
     merged = pd.merge(captions_df, go_df, on="protein_id", how="inner")
 
-    # 4️⃣ Report unmatched IDs
-    unmatched_captions = set(captions_df["protein_id"]) - set(merged["protein_id"])
-    unmatched_go = set(go_df["protein_id"]) - set(merged["protein_id"])
-
+    # 4️⃣ Check for matches
     if merged.empty:
         print("⚠️ No matches found. Check your IDs and formatting.")
     else:
@@ -53,7 +50,10 @@ if __name__ == "__main__":
         merged.to_csv("similarity_results.csv", index=False)
         print(f"✅ Done! {len(merged)} results saved to similarity_results.csv")
 
+    # 7️⃣ Report unmatched counts (avoid dumping huge lists)
+    unmatched_captions = set(captions_df["protein_id"]) - set(merged["protein_id"])
+    unmatched_go = set(go_df["protein_id"]) - set(merged["protein_id"])
     if unmatched_captions:
-        print("⚠️ These generated caption IDs had no GO match:", unmatched_captions)
+        print(f"⚠️ {len(unmatched_captions)} generated captions had no GO match")
     if unmatched_go:
-        print("⚠️ These GO IDs had no caption match:", unmatched_go)
+        print(f"⚠️ {len(unmatched_go)} GO IDs had no caption match")
