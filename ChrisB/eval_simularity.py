@@ -1,11 +1,17 @@
 import os
-from dif_description import similarity_score
+import glob
+import pandas as pd
 from sentence_transformers import SentenceTransformer, util
 
-# Load model once
+# ============================================================
+# 🔹 1. Load sentence-transformers model
+# ============================================================
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
-# --- Step 1: Parse GO .obo file ---
+
+# ============================================================
+# 🔹 2. Parse GO .obo file into dict {GO_ID: {name, definition}}
+# ============================================================
 def parse_go_obo(obo_path):
     go_terms = {}
     with open(obo_path, 'r', encoding='utf-8') as f:
@@ -27,44 +33,68 @@ def parse_go_obo(obo_path):
                 }
     return go_terms
 
-# --- Step 2: Load filtered GO IDs ---
+
+# ============================================================
+# 🔹 3. Load list of matched GO IDs
+# ============================================================
 def load_matched_ids(filepath):
     with open(filepath, "r") as f:
         return {line.strip() for line in f if line.startswith("GO:")}
 
-# --- Step 3: Compute top-N most similar GO definitions ---
+
+# ============================================================
+# 🔹 4. Compute top-N most similar GO definitions for a caption
+# ============================================================
 def get_top_go_matches(generated_desc, reference_go_dict, top_k=5):
     gen_embedding = model.encode(generated_desc, convert_to_tensor=True)
     results = []
-
     for go_id, entry in reference_go_dict.items():
         ref_embedding = model.encode(entry["definition"], convert_to_tensor=True)
         score = util.cos_sim(gen_embedding, ref_embedding).item()
         results.append((go_id, entry["name"], entry["definition"], score))
-
-    results.sort(key=lambda x: x[3], reverse=True)  # sort by similarity
+    results.sort(key=lambda x: x[3], reverse=True)
     return results[:top_k]
 
-# --- Main execution ---
-if __name__ == "__main__":
-    # Step 4: Get your input description
-    generated_description = input("Enter BLIP-2 generated description:\n> ").strip()
 
-    # Step 5: Load data
+# ============================================================
+# 🔹 5. Main: evaluate all BLIP-2 captions automatically
+# ============================================================
+if __name__ == "__main__":
     go_path = "GO_June_1_2025.obo"
     match_path = "matched_ids_with_go.txt"
     print("\n[+] Loading GO terms and matched IDs...")
     all_go_terms = parse_go_obo(go_path)
     matched_ids = load_matched_ids(match_path)
     filtered_go = {go_id: all_go_terms[go_id] for go_id in matched_ids if go_id in all_go_terms}
+    print(f"✅ Loaded {len(filtered_go)} filtered GO terms.")
 
-    # Step 6: Compute top matches
-    print("\n[+] Computing similarity...")
-    top_matches = get_top_go_matches(generated_description, filtered_go, top_k=5)
+    # Find all caption files
+    caption_files = sorted(glob.glob("test_output*_description.txt"))
+    if not caption_files:
+        print("⚠️ No caption files found (expected test_output*_description.txt)")
+        exit()
 
-    print("\n🔍 Top Matching GO Terms:")
-    for go_id, name, definition, score in top_matches:
-        print(f"\nGO ID: {go_id}")
-        print(f"Name: {name}")
-        print(f"Definition: {definition}")
-        print(f"Similarity Score: {score:.4f}")
+    all_results = []
+
+    for fpath in caption_files:
+        with open(fpath, "r", encoding="utf-8") as f:
+            caption = f.read().strip()
+        base = os.path.basename(fpath)
+        print(f"\n🔍 Evaluating {base} ...")
+
+        top_matches = get_top_go_matches(caption, filtered_go, top_k=5)
+
+        for go_id, name, definition, score in top_matches:
+            all_results.append({
+                "file": base,
+                "generated_caption": caption,
+                "go_id": go_id,
+                "go_name": name,
+                "go_definition": definition,
+                "similarity_score": score
+            })
+
+    # Save combined results
+    out_path = "top_similarity_results.csv"
+    pd.DataFrame(all_results).to_csv(out_path, index=False)
+    print(f"\n✅ Done! Saved top-5 GO matches per caption → {out_path}")
