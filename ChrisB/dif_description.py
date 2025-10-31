@@ -21,36 +21,40 @@ if __name__ == "__main__":
     go_df["protein_id"] = go_df["protein_id"].apply(clean_id)
 
     # 2️⃣ Read all generated captions
-    files = glob.glob("test_output*_description.txt")
+    files = sorted(glob.glob("test_output*_description.txt"))  # sorted ensures order
     data = []
-    for f in files:
-        match = re.search(r"test_output(.*?)_description\.txt", os.path.basename(f))
-        protein_id = clean_id(match.group(1)) if match else clean_id(os.path.splitext(os.path.basename(f))[0])
+
+    for i, f in enumerate(files):
+        # Map file index to GO ID by order
+        if i < len(go_df):
+            protein_id = go_df.iloc[i]["protein_id"]
+        else:
+            protein_id = f"unknown_{i}"  # fallback if more files than GO IDs
+
         with open(f, "r") as file:
             caption = file.read().strip()
+
         data.append({"protein_id": protein_id, "generated_caption": caption})
 
     captions_df = pd.DataFrame(data)
-    captions_df["protein_id"] = captions_df["protein_id"].apply(clean_id)
 
-    # 3️⃣ Merge GO references with generated captions
+    # 3️⃣ Merge captions with GO references
     merged = pd.merge(captions_df, go_df, on="protein_id", how="inner")
 
-    # 4️⃣ Check for matches
     if merged.empty:
         print("⚠️ No matches found. Check your IDs and formatting.")
     else:
-        # 5️⃣ Compute similarity scores
+        # 4️⃣ Compute similarity scores
         merged["similarity"] = merged.apply(
             lambda row: similarity_score(row["generated_caption"], row["go_terms"]),
             axis=1
         )
 
-        # 6️⃣ Save results
+        # 5️⃣ Save results
         merged.to_csv("similarity_results.csv", index=False)
         print(f"✅ Done! {len(merged)} results saved to similarity_results.csv")
 
-    # 7️⃣ Report unmatched counts (avoid dumping huge lists)
+    # 6️⃣ Report unmatched counts
     unmatched_captions = set(captions_df["protein_id"]) - set(merged["protein_id"])
     unmatched_go = set(go_df["protein_id"]) - set(merged["protein_id"])
     if unmatched_captions:
