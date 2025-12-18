@@ -11,7 +11,7 @@ model.eval().to(torch.float32)  # Ensure model runs in float32 to avoid dtype mi
 
 # Input and output paths
 FASTA_FILE = "train_sequences.fasta"  # <-- your CAFA FASTA file path
-OUTPUT_DIR = "/data/summer2020/naufal/testing_embeddings"
+OUTPUT_DIR = "/data/summer2020/ChrisB/testing_embeddings"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # FASTA reader
