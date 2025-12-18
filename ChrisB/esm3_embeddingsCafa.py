@@ -10,7 +10,7 @@ model = ESM3.from_pretrained(ESM3_OPEN_SMALL, device=torch.device("cuda"))
 model.eval().to(torch.float32)  # Ensure model runs in float32 to avoid dtype mismatch
 
 # Input and output paths
-FASTA_FILE = "/data/summer2020/naufal/testing_sequences.fasta"
+FASTA_FILE = "/path/to/cafa/train_sequences.fasta"
 OUTPUT_DIR = "/data/summer2020/naufal/testing_embeddings"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
