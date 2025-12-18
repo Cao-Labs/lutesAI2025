@@ -10,7 +10,7 @@ model = ESM3.from_pretrained(ESM3_OPEN_SMALL, device=torch.device("cuda"))
 model.eval().to(torch.float32)  # Ensure model runs in float32 to avoid dtype mismatch
 
 # Input and output paths
-FASTA_FILE = "/path/to/cafa/train_sequences.fasta"
+FASTA_FILE = "train_sequences.fasta"  # <-- your CAFA FASTA file path
 OUTPUT_DIR = "/data/summer2020/naufal/testing_embeddings"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -61,8 +61,3 @@ for idx, (seq_id, seq) in enumerate(fasta_reader(FASTA_FILE), start=1):
         print(f"Error processing {seq_id}: {e}")
 
 print(f"Done. All valid sequence embeddings saved in: {OUTPUT_DIR}")
-
-
-
-
-
