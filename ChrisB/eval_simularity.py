@@ -62,6 +62,7 @@ def get_top_go_matches(generated_desc, reference_go_dict, top_k=5):
 if __name__ == "__main__":
     go_path = "GO_June_1_2025.obo"
     match_path = "matched_ids_with_go.txt"
+
     print("\n[+] Loading GO terms and matched IDs...")
     all_go_terms = parse_go_obo(go_path)
     matched_ids = load_matched_ids(match_path)
