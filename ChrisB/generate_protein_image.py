@@ -1,43 +1,117 @@
-#!/usr/bin/env python3
-import argparse
-import os
-from PIL import Image
-from lavis.models import load_model_and_preprocess
+# -----------------------------
+# LOAD PRECOMPUTED ESM-3 EMBEDDINGS
+# -----------------------------
 
-def main():
-    parser = argparse.ArgumentParser(description="Run BLIP-2 on an image")
-    parser.add_argument("--image", type=str, required=True,
-                        help="Path to the input image")
-    args = parser.parse_args()
+EMBEDDING_DIR = os.path.join(CFG.PROJECT_ROOT, "esm3_embeddings")
 
-    image_path = args.image
+def load_esm3_embedding(pid):
+    """
+    Loads a precomputed ESM-3 embedding (.pt file)
+    Expected shape: [L, D]
+    """
+    emb_path = os.path.join(EMBEDDING_DIR, f"{pid}.pt")
 
-    # Debug: print image path
-    print(f"[DEBUG] Image path provided: {image_path}")
-    print(f"[DEBUG] Does the file exist? {os.path.exists(image_path)}")
+    if not os.path.exists(emb_path):
+        print(f"[WARNING] Missing embedding for {pid}")
+        return None
 
-    # Load image
-    try:
-        raw_image = Image.open(image_path).convert("RGB")
-        print("[DEBUG] Image loaded successfully.")
-    except FileNotFoundError:
-        print(f"[ERROR] Image file not found: {image_path}")
-        return
+    emb = torch.load(emb_path, map_location="cpu")
 
-    # Load BLIP-2 model
-    print("[DEBUG] Loading BLIP-2 model...")
-    model, vis_processors, _ = load_model_and_preprocess(
-        model_name="blip2_t5", model_type="pretrain_flant5xl", is_eval=True
+    # handle dictionary format sometimes produced by esm scripts
+    if isinstance(emb, dict):
+        if "representations" in emb:
+            emb = emb["representations"]
+        elif "embedding" in emb:
+            emb = emb["embedding"]
+
+    if torch.is_tensor(emb):
+        emb = emb.numpy()
+
+    return emb
+
+
+# -----------------------------
+# MAIN LOOP MODIFICATION
+# -----------------------------
+
+for pid in selected_pids:
+
+    print(f"Generating plot for {pid}...")
+
+    seq = seqs[pid]
+    terms = prot_terms[pid]
+
+    # 1. One Hot Encoding
+    one_hot, aa_labels = get_one_hot(seq)
+
+    # 2. Sliding Window Hydrophobicity
+    trace = get_sliding_window_trace(seq, window=WINDOW_SIZE)
+
+    # 3. LOAD ESM-3 EMBEDDING
+    esm_emb = load_esm3_embedding(pid)
+
+    if esm_emb is None:
+        print(f"Skipping {pid} (embedding not found)")
+        continue
+
+    # reduce embedding dimensions for visualization
+    esm_pca = reduce_dimensions(esm_emb, n_components=20).T
+
+
+    # -----------------------------
+    # PLOTTING
+    # -----------------------------
+
+    fig, axes = plt.subplots(
+        4, 1,
+        figsize=(12, 14),
+        gridspec_kw={'height_ratios': [2, 2, 1, 1]}
     )
-    print("[DEBUG] Model loaded successfully.")
 
-    # Preprocess image
-    image = vis_processors["eval"](raw_image).unsqueeze(0)
-    print("[DEBUG] Image preprocessed.")
+    # Plot 1: One-Hot Heatmap
+    sns.heatmap(one_hot, ax=axes[0], cmap="Blues", cbar=False,
+                yticklabels=list(aa_labels))
 
-    # Generate caption
-    caption = model.generate({"image": image})
-    print("Caption:", caption[0])
+    axes[0].set_title(f"Protein: {pid} (Length: {len(seq)}) - One-Hot Encoding")
+    axes[0].set_ylabel("Amino Acid")
+    axes[0].set_xticks([])
 
-if __name__ == "__main__":
-    main()
+    # Plot 2: ESM-3 Embedding PCA
+    sns.heatmap(esm_pca, ax=axes[1], cmap="viridis", cbar=False)
+
+    axes[1].set_title("ESM-3 Embedding Representation (PCA 20 components)")
+    axes[1].set_ylabel("PCA Component")
+    axes[1].set_xticks([])
+
+    # Plot 3: Hydrophobicity Trace
+    x_vals = range(len(trace))
+
+    axes[2].plot(x_vals, trace, color='orange', linewidth=2)
+    axes[2].axhline(y=0, color='gray', linestyle='--')
+
+    axes[2].set_title(f"Sliding Window Hydrophobicity (Window={WINDOW_SIZE})")
+    axes[2].set_ylabel("Hydrophobicity")
+    axes[2].set_xlim(0, len(seq))
+    axes[2].set_xlabel("Residue Position")
+
+    # Plot 4: GO Terms
+    axes[3].axis('off')
+
+    import textwrap
+    wrapped_terms = textwrap.fill(", ".join(terms), width=80)
+
+    text_content = f"True GO Terms ({ASPECT}):\n\n{wrapped_terms}"
+
+    axes[3].text(0.1, 0.5, text_content,
+                 fontsize=12,
+                 va='center',
+                 wrap=True)
+
+    plt.tight_layout()
+
+    save_path = os.path.join(CFG.OUTPUT_DIR, f"viz_{pid}.png")
+
+    plt.savefig(save_path)
+    plt.close()
+
+    print(f"Saved {save_path}")
