@@ -16,10 +16,10 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
 # -----------------------------
-# LOAD PRECOMPUTED ESM-3 EMBEDDINGS
+# LOAD PRECOMPUTED ESM EMBEDDINGS
 # -----------------------------
 
-def load_esm3_embedding(pid):
+def load_esm_embedding(pid):
     """
     Loads a precomputed ESM embedding (.pt file)
     Returns numpy array [L, D]
@@ -33,10 +33,7 @@ def load_esm3_embedding(pid):
 
     emb = torch.load(emb_path, map_location="cpu")
 
-    # -----------------------------
-    # Handle all common ESM formats
-    # -----------------------------
-
+    # Handle common ESM storage formats
     if isinstance(emb, dict):
 
         if "representations" in emb:
@@ -56,7 +53,6 @@ def load_esm3_embedding(pid):
         else:
             emb = list(emb.values())[0]
 
-    # Convert tensor → numpy
     if torch.is_tensor(emb):
         emb = emb.detach().cpu().numpy()
 
@@ -70,7 +66,7 @@ def load_esm3_embedding(pid):
 
 
 # -----------------------------
-# FIND AVAILABLE PROTEINS
+# FIND AVAILABLE EMBEDDINGS
 # -----------------------------
 
 embedding_files = [
@@ -81,7 +77,8 @@ embedding_files = [
 
 print(f"Found {len(embedding_files)} embeddings")
 
-selected_pids = embedding_files[:10]  # visualize first 10
+# visualize first 10 proteins
+selected_pids = embedding_files[:10]
 
 
 # -----------------------------
@@ -92,7 +89,7 @@ for pid in selected_pids:
 
     print(f"\nGenerating plot for {pid}...")
 
-    esm_emb = load_esm3_embedding(pid)
+    esm_emb = load_esm_embedding(pid)
 
     if esm_emb is None:
         continue
@@ -102,8 +99,11 @@ for pid in selected_pids:
     # -----------------------------
 
     try:
-        pca = PCA(n_components=min(20, esm_emb.shape[1]))
+        n_components = min(20, esm_emb.shape[0], esm_emb.shape[1])
+        pca = PCA(n_components=n_components)
+
         esm_pca = pca.fit_transform(esm_emb).T
+
     except Exception as e:
         print(f"PCA failed for {pid}: {e}")
         continue
@@ -122,7 +122,7 @@ for pid in selected_pids:
         cbar=False
     )
 
-    ax.set_title(f"ESM Embedding Representation (PCA 20) — {pid}")
+    ax.set_title(f"ESM Embedding Representation (PCA {n_components}) — {pid}")
     ax.set_ylabel("PCA Component")
     ax.set_xlabel("Residue Position")
 
