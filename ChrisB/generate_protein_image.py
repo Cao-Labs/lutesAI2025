@@ -18,7 +18,7 @@ def load_esm3_embedding(pid):
 
     emb = torch.load(emb_path, map_location="cpu")
 
-    # Handle multiple possible formats
+    # Handle multiple embedding formats
     if isinstance(emb, dict):
 
         if "representations" in emb:
@@ -34,112 +34,131 @@ def load_esm3_embedding(pid):
     if torch.is_tensor(emb):
         emb = emb.detach().cpu().numpy()
 
-    # Debug confirmation
-    print(f"Loaded embedding for {pid} with shape {emb.shape}")
+    # Ensure correct shape
+    if emb is None or len(emb.shape) != 2:
+        print(f"[WARNING] Invalid embedding format for {pid}")
+        return None
+
+    print(f"[DEBUG] Loaded embedding for {pid} with shape {emb.shape}")
 
     return emb
 
 
 # -----------------------------
-# MAIN LOOP MODIFICATION
+# MAIN LOOP
 # -----------------------------
 
-for pid in selected_pids:
+def generate_visualizations():
 
-    print(f"\nGenerating plot for {pid}...")
+    for pid in selected_pids:
 
-    seq = seqs[pid]
-    terms = prot_terms[pid]
+        print(f"\nGenerating plot for {pid}...")
 
-    # 1. One Hot Encoding
-    one_hot, aa_labels = get_one_hot(seq)
+        seq = seqs.get(pid)
+        terms = prot_terms.get(pid, [])
 
-    # 2. Sliding Window Hydrophobicity
-    trace = get_sliding_window_trace(seq, window=WINDOW_SIZE)
+        if seq is None:
+            print(f"[WARNING] Missing sequence for {pid}")
+            continue
 
-    # 3. LOAD ESM-3 EMBEDDING
-    esm_emb = load_esm3_embedding(pid)
+        # 1. One Hot Encoding
+        one_hot, aa_labels = get_one_hot(seq)
 
-    if esm_emb is None:
-        print(f"Skipping {pid} (embedding not found)")
-        continue
+        # 2. Sliding Window Hydrophobicity
+        trace = get_sliding_window_trace(seq, window=WINDOW_SIZE)
 
-    # Reduce embedding dimensions for visualization
-    esm_pca = reduce_dimensions(esm_emb, n_components=20).T
+        # 3. LOAD ESM-3 EMBEDDING
+        esm_emb = load_esm3_embedding(pid)
 
+        if esm_emb is None:
+            print(f"Skipping {pid} (embedding not found)")
+            continue
 
-    # -----------------------------
-    # PLOTTING
-    # -----------------------------
-
-    fig, axes = plt.subplots(
-        4, 1,
-        figsize=(12, 14),
-        gridspec_kw={'height_ratios': [2, 2, 1, 1]}
-    )
-
-    # Plot 1: One-Hot Heatmap
-    sns.heatmap(
-        one_hot,
-        ax=axes[0],
-        cmap="Blues",
-        cbar=False,
-        yticklabels=list(aa_labels)
-    )
-
-    axes[0].set_title(f"Protein: {pid} (Length: {len(seq)}) - One-Hot Encoding")
-    axes[0].set_ylabel("Amino Acid")
-    axes[0].set_xticks([])
+        # Reduce embedding dimensions for visualization
+        esm_pca = reduce_dimensions(esm_emb, n_components=20).T
 
 
-    # Plot 2: ESM-3 Embedding PCA
-    sns.heatmap(
-        esm_pca,
-        ax=axes[1],
-        cmap="viridis",
-        cbar=False
-    )
+        # -----------------------------
+        # PLOTTING
+        # -----------------------------
 
-    axes[1].set_title("ESM-3 Embedding Representation (PCA 20 components)")
-    axes[1].set_ylabel("PCA Component")
-    axes[1].set_xticks([])
+        fig, axes = plt.subplots(
+            4,
+            1,
+            figsize=(12, 14),
+            gridspec_kw={'height_ratios': [2, 2, 1, 1]}
+        )
+
+        # Plot 1: One-Hot Heatmap
+        sns.heatmap(
+            one_hot,
+            ax=axes[0],
+            cmap="Blues",
+            cbar=False,
+            yticklabels=list(aa_labels)
+        )
+
+        axes[0].set_title(f"Protein: {pid} (Length: {len(seq)}) - One-Hot Encoding")
+        axes[0].set_ylabel("Amino Acid")
+        axes[0].set_xticks([])
 
 
-    # Plot 3: Hydrophobicity Trace
-    x_vals = range(len(trace))
+        # Plot 2: ESM-3 Embedding PCA
+        sns.heatmap(
+            esm_pca,
+            ax=axes[1],
+            cmap="viridis",
+            cbar=False
+        )
 
-    axes[2].plot(x_vals, trace, color="orange", linewidth=2)
-    axes[2].axhline(y=0, color="gray", linestyle="--")
-
-    axes[2].set_title(f"Sliding Window Hydrophobicity (Window={WINDOW_SIZE})")
-    axes[2].set_ylabel("Hydrophobicity")
-    axes[2].set_xlim(0, len(seq))
-    axes[2].set_xlabel("Residue Position")
+        axes[1].set_title("ESM-3 Embedding Representation (PCA 20 components)")
+        axes[1].set_ylabel("PCA Component")
+        axes[1].set_xticks([])
 
 
-    # Plot 4: GO Terms
-    axes[3].axis("off")
+        # Plot 3: Hydrophobicity Trace
+        x_vals = range(len(trace))
 
-    import textwrap
+        axes[2].plot(x_vals, trace, color="orange", linewidth=2)
+        axes[2].axhline(y=0, color="gray", linestyle="--")
 
-    wrapped_terms = textwrap.fill(", ".join(terms), width=80)
+        axes[2].set_title(f"Sliding Window Hydrophobicity (Window={WINDOW_SIZE})")
+        axes[2].set_ylabel("Hydrophobicity")
+        axes[2].set_xlim(0, len(seq))
+        axes[2].set_xlabel("Residue Position")
 
-    text_content = f"True GO Terms ({ASPECT}):\n\n{wrapped_terms}"
 
-    axes[3].text(
-        0.1,
-        0.5,
-        text_content,
-        fontsize=12,
-        va="center",
-        wrap=True
-    )
+        # Plot 4: GO Terms
+        axes[3].axis("off")
 
-    plt.tight_layout()
+        import textwrap
 
-    save_path = os.path.join(CFG.OUTPUT_DIR, f"viz_{pid}.png")
+        wrapped_terms = textwrap.fill(", ".join(terms), width=80)
 
-    plt.savefig(save_path)
-    plt.close()
+        text_content = f"True GO Terms ({ASPECT}):\n\n{wrapped_terms}"
 
-    print(f"Saved {save_path}")
+        axes[3].text(
+            0.1,
+            0.5,
+            text_content,
+            fontsize=12,
+            va="center",
+            wrap=True
+        )
+
+        plt.tight_layout()
+
+        save_path = os.path.join(CFG.OUTPUT_DIR, f"viz_{pid}.png")
+
+        plt.savefig(save_path)
+        plt.close()
+
+        print(f"[SAVED] {save_path}")
+
+
+# -----------------------------
+# RUN
+# -----------------------------
+
+if __name__ == "__main__":
+    generate_visualizations()
