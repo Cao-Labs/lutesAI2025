@@ -1,138 +1,202 @@
 import os
-import torch
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from Bio import SeqIO
+import random
+import torch
+import esm
 from sklearn.decomposition import PCA
 
 # -----------------------------
 # CONFIG
 # -----------------------------
 
-EMBEDDING_DIR = "/data/shared/databases/esm_embeddings"
-OUTPUT_DIR = "generated_images"
+ASPECT = "P"
+WINDOW_SIZE = 20
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+class CFG:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    PROJECT_ROOT = os.path.dirname(BASE_DIR)
+    TRAIN_SEQS = os.path.join(PROJECT_ROOT, "Train", "train_sequences.fasta")
+    TRAIN_TERMS = os.path.join(PROJECT_ROOT, "Train", "train_terms.tsv")
+    OUTPUT_DIR = os.path.join(PROJECT_ROOT, "analysis_plots")
+
+os.makedirs(CFG.OUTPUT_DIR, exist_ok=True)
+
+# -----------------------------
+# LOAD ESM MODEL
+# -----------------------------
+
+print("Loading ESM model...")
+
+model, alphabet = esm.pretrained.esm2_t33_650M_UR50D()
+batch_converter = alphabet.get_batch_converter()
+
+model = model.to(DEVICE)
+model.eval()
+
+# -----------------------------
+# EMBEDDING FUNCTION
+# -----------------------------
+
+def get_esm_embeddings(seq):
+
+    data = [("protein", seq)]
+    batch_labels, batch_strs, batch_tokens = batch_converter(data)
+
+    batch_tokens = batch_tokens.to(DEVICE)
+
+    with torch.no_grad():
+        results = model(batch_tokens, repr_layers=[33])
+
+    embeddings = results["representations"][33][0,1:-1].cpu().numpy()
+
+    return embeddings
 
 
 # -----------------------------
-# LOAD PRECOMPUTED ESM EMBEDDINGS
+# PCA REDUCTION
 # -----------------------------
 
-def load_esm_embedding(pid):
-    """
-    Loads a precomputed ESM embedding (.pt file)
-    Returns numpy array [L, D]
-    """
+def reduce_dimensions(embeddings, n_components=20):
 
-    emb_path = os.path.join(EMBEDDING_DIR, f"{pid}.pt")
-
-    if not os.path.exists(emb_path):
-        print(f"[WARNING] Missing embedding for {pid}")
-        return None
-
-    emb = torch.load(emb_path, map_location="cpu")
-
-    # Handle common ESM storage formats
-    if isinstance(emb, dict):
-
-        if "representations" in emb:
-            rep = emb["representations"]
-
-            if isinstance(rep, dict):
-                emb = list(rep.values())[0]
-            else:
-                emb = rep
-
-        elif "mean_representations" in emb:
-            emb = list(emb["mean_representations"].values())[0]
-
-        elif "embedding" in emb:
-            emb = emb["embedding"]
-
-        else:
-            emb = list(emb.values())[0]
-
-    if torch.is_tensor(emb):
-        emb = emb.detach().cpu().numpy()
-
-    if not isinstance(emb, np.ndarray):
-        print(f"[ERROR] Could not extract embedding tensor for {pid}")
-        return None
-
-    print(f"Loaded embedding for {pid} with shape {emb.shape}")
-
-    return emb
-
-
-# -----------------------------
-# FIND AVAILABLE EMBEDDINGS
-# -----------------------------
-
-embedding_files = [
-    f.replace(".pt", "")
-    for f in os.listdir(EMBEDDING_DIR)
-    if f.endswith(".pt")
-]
-
-print(f"Found {len(embedding_files)} embeddings")
-
-# visualize first 10 proteins
-selected_pids = embedding_files[:10]
-
-
-# -----------------------------
-# MAIN LOOP
-# -----------------------------
-
-for pid in selected_pids:
-
-    print(f"\nGenerating plot for {pid}...")
-
-    esm_emb = load_esm_embedding(pid)
-
-    if esm_emb is None:
-        continue
-
-    # -----------------------------
-    # PCA DIMENSION REDUCTION
-    # -----------------------------
+    if len(embeddings) < 5:
+        return embeddings
 
     try:
-        n_components = min(20, esm_emb.shape[0], esm_emb.shape[1])
-        pca = PCA(n_components=n_components)
+        pca = PCA(n_components=min(n_components, len(embeddings), embeddings.shape[1]))
+        return pca.fit_transform(embeddings)
 
-        esm_pca = pca.fit_transform(esm_emb).T
-
-    except Exception as e:
-        print(f"PCA failed for {pid}: {e}")
-        continue
+    except:
+        return embeddings[:, :n_components]
 
 
-    # -----------------------------
-    # PLOT
-    # -----------------------------
+# -----------------------------
+# HYDROPHOBICITY TRACE
+# -----------------------------
 
-    fig, ax = plt.subplots(figsize=(12,6))
+def get_sliding_window_trace(seq, window=20):
 
-    sns.heatmap(
-        esm_pca,
-        ax=ax,
-        cmap="viridis",
-        cbar=False
-    )
+    hydro_map = {
+        "A":1.8,"R":-4.5,"N":-3.5,"D":-3.5,"C":2.5,"Q":-3.5,"E":-3.5,
+        "G":-0.4,"H":-3.2,"I":4.5,"L":3.8,"K":-3.9,"M":1.9,"F":2.8,
+        "P":-1.6,"S":-0.8,"T":-0.7,"W":-0.9,"Y":-1.3,"V":4.2
+    }
 
-    ax.set_title(f"ESM Embedding Representation (PCA {n_components}) — {pid}")
-    ax.set_ylabel("PCA Component")
-    ax.set_xlabel("Residue Position")
+    vals = [hydro_map.get(aa,0) for aa in seq]
 
-    plt.tight_layout()
+    if len(vals) < window:
+        return [np.mean(vals)]
 
-    save_path = os.path.join(OUTPUT_DIR, f"{pid}.png")
+    means = []
 
-    plt.savefig(save_path)
-    plt.close()
+    for i in range(len(vals)-window+1):
+        means.append(np.mean(vals[i:i+window]))
 
-    print(f"Saved {save_path}")
+    return means
 
-print("\nDone.")
+
+# -----------------------------
+# ONE HOT ENCODING
+# -----------------------------
+
+def get_one_hot(seq, max_len=1000):
+
+    aa_order = "ACDEFGHIKLMNPQRSTVWY"
+    vocab = {aa:i for i,aa in enumerate(aa_order)}
+
+    mat = np.zeros((len(aa_order), min(len(seq), max_len)))
+
+    for i, aa in enumerate(seq[:max_len]):
+        if aa in vocab:
+            mat[vocab[aa], i] = 1
+
+    return mat, aa_order
+
+
+# -----------------------------
+# MAIN
+# -----------------------------
+
+def main():
+
+    print("Loading Data...")
+
+    seqs = {}
+
+    for rec in SeqIO.parse(CFG.TRAIN_SEQS, "fasta"):
+        pid = rec.id.split("|")[1] if "|" in rec.id else rec.id.split()[0]
+        seqs[pid] = str(rec.seq)
+
+    train_terms = pd.read_csv(CFG.TRAIN_TERMS, sep="\t")
+
+    aspect_df = train_terms[train_terms["aspect"] == ASPECT]
+
+    prot_terms = aspect_df.groupby("EntryID")["term"].apply(list).to_dict()
+
+    valid_pids = [p for p in seqs if p in prot_terms]
+
+    selected_pids = random.sample(valid_pids, 10)
+
+    print("Selected proteins:", selected_pids)
+
+    for pid in selected_pids:
+
+        print("Generating plot for", pid)
+
+        seq = seqs[pid]
+        terms = prot_terms[pid]
+
+        one_hot, aa_labels = get_one_hot(seq)
+
+        trace = get_sliding_window_trace(seq)
+
+        esm_emb = get_esm_embeddings(seq)
+
+        esm_pca = reduce_dimensions(esm_emb).T
+
+        fig, axes = plt.subplots(
+            4,1,
+            figsize=(12,14),
+            gridspec_kw={"height_ratios":[2,2,1,1]}
+        )
+
+        sns.heatmap(one_hot, ax=axes[0], cmap="Blues", cbar=False,
+                    yticklabels=list(aa_labels))
+
+        axes[0].set_title(f"{pid} One-Hot Encoding")
+
+        sns.heatmap(esm_pca, ax=axes[1], cmap="viridis", cbar=False)
+
+        axes[1].set_title("ESM Embedding PCA")
+
+        axes[2].plot(trace, color="orange")
+        axes[2].axhline(0, linestyle="--", color="gray")
+        axes[2].set_title("Hydrophobicity Trace")
+
+        axes[3].axis("off")
+
+        import textwrap
+
+        wrapped = textwrap.fill(", ".join(terms), width=80)
+
+        axes[3].text(0.1,0.5,wrapped,fontsize=12)
+
+        plt.tight_layout()
+
+        save_path = os.path.join(CFG.OUTPUT_DIR, f"viz_{pid}.png")
+
+        plt.savefig(save_path)
+
+        plt.close()
+
+        print("Saved", save_path)
+
+    print("Done")
+
+
+if __name__ == "__main__":
+    main()
