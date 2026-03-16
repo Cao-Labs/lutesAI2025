@@ -1,201 +1,143 @@
-import os
 import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-from Bio import SeqIO
-import random
 import torch
-import esm
-from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+import argparse
+from sklearn.metrics.pairwise import cosine_similarity
+
+from esm.models.esm3 import ESM3
+from esm.sdk.api import ESMProtein, SamplingConfig
+from esm.utils.constants.models import ESM3_OPEN_SMALL
+
 
 # -----------------------------
-# CONFIG
+# Load ESM-3 model
 # -----------------------------
+def load_esm3_model():
 
-ASPECT = "P"
-WINDOW_SIZE = 20
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("[INFO] Loading ESM-3 model...")
 
-class CFG:
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    PROJECT_ROOT = os.path.dirname(BASE_DIR)
-    TRAIN_SEQS = os.path.join(PROJECT_ROOT, "Train", "train_sequences.fasta")
-    TRAIN_TERMS = os.path.join(PROJECT_ROOT, "Train", "train_terms.tsv")
-    OUTPUT_DIR = os.path.join(PROJECT_ROOT, "analysis_plots")
+    model = ESM3.from_pretrained(ESM3_OPEN_SMALL)
 
-os.makedirs(CFG.OUTPUT_DIR, exist_ok=True)
+    if torch.cuda.is_available():
+        model = model.cuda()
 
-# -----------------------------
-# LOAD ESM MODEL
-# -----------------------------
+    model.eval()
 
-print("Loading ESM model...")
+    return model
 
-model, alphabet = esm.pretrained.esm2_t33_650M_UR50D()
-batch_converter = alphabet.get_batch_converter()
-
-model = model.to(DEVICE)
-model.eval()
 
 # -----------------------------
-# EMBEDDING FUNCTION
+# Generate embedding
 # -----------------------------
+def generate_embedding(model, sequence):
 
-def get_esm_embeddings(seq):
+    protein = ESMProtein(sequence=sequence)
 
-    data = [("protein", seq)]
-    batch_labels, batch_strs, batch_tokens = batch_converter(data)
-
-    batch_tokens = batch_tokens.to(DEVICE)
+    config = SamplingConfig(
+        return_per_residue_embeddings=True
+    )
 
     with torch.no_grad():
-        results = model(batch_tokens, repr_layers=[33])
+        result = model.generate(protein, config)
 
-    embeddings = results["representations"][33][0,1:-1].cpu().numpy()
+    embedding = result.per_residue_embedding
 
-    return embeddings
+    # remove NaNs
+    embedding = torch.nan_to_num(
+        embedding,
+        nan=0.0,
+        posinf=0.0,
+        neginf=0.0
+    )
 
-
-# -----------------------------
-# PCA REDUCTION
-# -----------------------------
-
-def reduce_dimensions(embeddings, n_components=20):
-
-    if len(embeddings) < 5:
-        return embeddings
-
-    try:
-        pca = PCA(n_components=min(n_components, len(embeddings), embeddings.shape[1]))
-        return pca.fit_transform(embeddings)
-
-    except:
-        return embeddings[:, :n_components]
+    return embedding   # (L, D)
 
 
 # -----------------------------
-# HYDROPHOBICITY TRACE
+# Convert embedding → similarity matrix
 # -----------------------------
+def to_similarity_matrix(embedding):
 
-def get_sliding_window_trace(seq, window=20):
+    embedding_np = embedding.cpu().numpy()
 
-    hydro_map = {
-        "A":1.8,"R":-4.5,"N":-3.5,"D":-3.5,"C":2.5,"Q":-3.5,"E":-3.5,
-        "G":-0.4,"H":-3.2,"I":4.5,"L":3.8,"K":-3.9,"M":1.9,"F":2.8,
-        "P":-1.6,"S":-0.8,"T":-0.7,"W":-0.9,"Y":-1.3,"V":4.2
-    }
+    sim_matrix = cosine_similarity(embedding_np)
 
-    vals = [hydro_map.get(aa,0) for aa in seq]
-
-    if len(vals) < window:
-        return [np.mean(vals)]
-
-    means = []
-
-    for i in range(len(vals)-window+1):
-        means.append(np.mean(vals[i:i+window]))
-
-    return means
+    return sim_matrix
 
 
 # -----------------------------
-# ONE HOT ENCODING
+# Normalize matrix
 # -----------------------------
+def normalize_matrix(matrix):
 
-def get_one_hot(seq, max_len=1000):
+    min_val = matrix.min()
+    max_val = matrix.max()
 
-    aa_order = "ACDEFGHIKLMNPQRSTVWY"
-    vocab = {aa:i for i,aa in enumerate(aa_order)}
+    normalized = (matrix - min_val) / (max_val - min_val + 1e-8)
 
-    mat = np.zeros((len(aa_order), min(len(seq), max_len)))
-
-    for i, aa in enumerate(seq[:max_len]):
-        if aa in vocab:
-            mat[vocab[aa], i] = 1
-
-    return mat, aa_order
+    return normalized
 
 
 # -----------------------------
-# MAIN
+# Save PNG
 # -----------------------------
+def save_image(matrix, output_path):
 
+    normalized = normalize_matrix(matrix)
+
+    plt.figure(figsize=(5,5))
+
+    plt.imshow(
+        normalized,
+        cmap="viridis",
+        vmin=0,
+        vmax=1
+    )
+
+    plt.title("Protein Similarity Image (ESM-3)")
+    plt.axis("off")
+
+    plt.tight_layout()
+
+    plt.savefig(output_path, bbox_inches="tight")
+
+    plt.close()
+
+    print(f"[✓] Saved image: {output_path}")
+
+
+# -----------------------------
+# Main
+# -----------------------------
 def main():
 
-    print("Loading Data...")
+    parser = argparse.ArgumentParser(
+        description="Generate protein feature image from sequence using ESM-3."
+    )
 
-    seqs = {}
+    parser.add_argument(
+        "--sequence",
+        type=str,
+        required=True,
+        help="Protein sequence"
+    )
 
-    for rec in SeqIO.parse(CFG.TRAIN_SEQS, "fasta"):
-        pid = rec.id.split("|")[1] if "|" in rec.id else rec.id.split()[0]
-        seqs[pid] = str(rec.seq)
+    parser.add_argument(
+        "--out",
+        type=str,
+        default="protein_image.png",
+        help="Output image filename"
+    )
 
-    train_terms = pd.read_csv(CFG.TRAIN_TERMS, sep="\t")
+    args = parser.parse_args()
 
-    aspect_df = train_terms[train_terms["aspect"] == ASPECT]
+    model = load_esm3_model()
 
-    prot_terms = aspect_df.groupby("EntryID")["term"].apply(list).to_dict()
+    embedding = generate_embedding(model, args.sequence)
 
-    valid_pids = [p for p in seqs if p in prot_terms]
+    matrix = to_similarity_matrix(embedding)
 
-    selected_pids = random.sample(valid_pids, 10)
-
-    print("Selected proteins:", selected_pids)
-
-    for pid in selected_pids:
-
-        print("Generating plot for", pid)
-
-        seq = seqs[pid]
-        terms = prot_terms[pid]
-
-        one_hot, aa_labels = get_one_hot(seq)
-
-        trace = get_sliding_window_trace(seq)
-
-        esm_emb = get_esm_embeddings(seq)
-
-        esm_pca = reduce_dimensions(esm_emb).T
-
-        fig, axes = plt.subplots(
-            4,1,
-            figsize=(12,14),
-            gridspec_kw={"height_ratios":[2,2,1,1]}
-        )
-
-        sns.heatmap(one_hot, ax=axes[0], cmap="Blues", cbar=False,
-                    yticklabels=list(aa_labels))
-
-        axes[0].set_title(f"{pid} One-Hot Encoding")
-
-        sns.heatmap(esm_pca, ax=axes[1], cmap="viridis", cbar=False)
-
-        axes[1].set_title("ESM Embedding PCA")
-
-        axes[2].plot(trace, color="orange")
-        axes[2].axhline(0, linestyle="--", color="gray")
-        axes[2].set_title("Hydrophobicity Trace")
-
-        axes[3].axis("off")
-
-        import textwrap
-
-        wrapped = textwrap.fill(", ".join(terms), width=80)
-
-        axes[3].text(0.1,0.5,wrapped,fontsize=12)
-
-        plt.tight_layout()
-
-        save_path = os.path.join(CFG.OUTPUT_DIR, f"viz_{pid}.png")
-
-        plt.savefig(save_path)
-
-        plt.close()
-
-        print("Saved", save_path)
-
-    print("Done")
+    save_image(matrix, args.out)
 
 
 if __name__ == "__main__":
