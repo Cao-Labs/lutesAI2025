@@ -1,8 +1,12 @@
+import os
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
 import argparse
 from sklearn.metrics.pairwise import cosine_similarity
+
+# ---- FIX: force transformers to avoid fast tokenizer conflicts ----
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 from esm.models.esm3 import ESM3
 from esm.sdk.api import ESMProtein, SamplingConfig
