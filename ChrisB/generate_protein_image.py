@@ -1,16 +1,11 @@
-import os
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
 import argparse
 from sklearn.metrics.pairwise import cosine_similarity
 
-# ---- FIX: force transformers to avoid fast tokenizer conflicts ----
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
 from esm.models.esm3 import ESM3
-from esm.sdk.api import ESMProtein, SamplingConfig
-from esm.utils.constants.models import ESM3_OPEN_SMALL
+from esm.sdk.api import ESMProtein
 
 
 # -----------------------------
@@ -20,7 +15,7 @@ def load_esm3_model():
 
     print("[INFO] Loading ESM-3 model...")
 
-    model = ESM3.from_pretrained(ESM3_OPEN_SMALL)
+    model = ESM3.from_pretrained("esm3_sm_open_v1")
 
     if torch.cuda.is_available():
         model = model.cuda()
@@ -37,16 +32,11 @@ def generate_embedding(model, sequence):
 
     protein = ESMProtein(sequence=sequence)
 
-    config = SamplingConfig(
-        return_per_residue_embeddings=True
-    )
-
     with torch.no_grad():
-        result = model.generate(protein, config)
+        output = model.encode(protein)
 
-    embedding = result.per_residue_embedding
+    embedding = output.per_residue_embeddings
 
-    # remove NaNs
     embedding = torch.nan_to_num(
         embedding,
         nan=0.0,
@@ -54,7 +44,7 @@ def generate_embedding(model, sequence):
         neginf=0.0
     )
 
-    return embedding   # (L, D)
+    return embedding
 
 
 # -----------------------------
