@@ -1,2 +1,2 @@
 🧬 Generated Protein Function Description:
-a heatmap is a visual representation of the relative similarity of two proteins or groups of proteins, such as a protein family or a protein sequence
+off-diagonal signals indicate interactions or repeating motifs and gaps indicate boundaries or flexible regions, while diagonal blocks indicate structural domains and off-diagonal signals indicate interactions or repeating patterns
