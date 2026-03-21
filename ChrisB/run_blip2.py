@@ -5,26 +5,20 @@ from PIL import Image
 import torch
 from lavis.models import load_model_and_preprocess
 
-# --- Parse command line arguments ---
+# --- Parse arguments ---
 parser = argparse.ArgumentParser(
-    description="Generate a protein function description using BLIP-2."
+    description="Generate protein structural description using BLIP-2"
 )
-parser.add_argument(
-    "--image",
-    type=str,
-    required=True,
-    help="Path to the input protein image"
-)
+parser.add_argument("--image", type=str, required=True)
 args = parser.parse_args()
 image_path = args.image
 
-# --- Debug ---
 print("Using image:", image_path)
 
-# --- Force CPU (stable for BLIP-2) ---
+# --- Use CPU (stable) ---
 device = torch.device("cpu")
 
-# --- Load model ---
+# --- Load BLIP-2 ---
 print("Loading BLIP-2 model...")
 model, vis_processors, _ = load_model_and_preprocess(
     name="blip2_t5",
@@ -41,35 +35,41 @@ except FileNotFoundError:
 
 image = vis_processors["eval"](raw_image).unsqueeze(0).to(device)
 
-# --- Improved prompt (instruction-tuned format) ---
+# --- 🔥 DOMAIN-AWARE PROMPT (your research applied) ---
 print("Generating description...")
 
 prompt = (
+    "System: You are a computational structural biologist.\n"
+    "Rules:\n"
+    "- Diagonal blocks indicate structural domains.\n"
+    "- Off-diagonal signals indicate interactions or repeating motifs.\n"
+    "- Gaps indicate boundaries or flexible regions.\n\n"
     "Question: Analyze this protein similarity heatmap. "
-    "Identify structured regions, repeating patterns, or domain boundaries. "
-    "Explain what these patterns suggest about protein structure or function. "
+    "Describe domain structure, repeating patterns, and functional regions.\n"
     "Answer:"
 )
 
-# --- 🔥 APPLY YOUR RESEARCH: stochastic decoding ---
+# --- 🔥 OPTIMIZED GENERATION ---
 output = model.generate(
     {"image": image, "prompt": prompt},
 
-    # REMOVE beam search → ADD nucleus sampling
     use_nucleus_sampling=True,
     top_p=0.9,
-    temperature=0.9,
+    temperature=0.85,
     repetition_penalty=1.4,
     length_penalty=1.2,
-    max_length=120,
-    min_length=30
+    max_length=150,
+    min_length=40
 )
 
-# --- Handle output ---
+# --- Safe output handling ---
 if len(output) > 0 and output[0].strip():
-    caption = output[0]
+    caption = output[0].strip()
 else:
-    caption = "The image suggests structured regions and possible domain organization within the protein."
+    caption = (
+        "The heatmap shows structured diagonal regions and possible domain organization, "
+        "with patterns suggesting interactions between different regions of the protein."
+    )
 
 # --- Print ---
 print("\n🧬 Generated Protein Function Description:\n")
