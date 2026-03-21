@@ -1,138 +1,104 @@
-import numpy as np
-import torch
-import matplotlib.pyplot as plt
+# generate_protein_image.py
+import os
 import argparse
+import torch
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
 from sklearn.metrics.pairwise import cosine_similarity
 
+# ESM3 Specific Imports
 from esm.models.esm3 import ESM3
-from esm.sdk.api import ESMProtein
+from esm.sdk.api import ESMProtein, SamplingConfig
+from esm.utils.constants.models import ESM3_OPEN_SMALL
 
-
-# -----------------------------
-# Load ESM-3 model
-# -----------------------------
-def load_esm3_model():
-
-    print("[INFO] Loading ESM-3 model...")
-
-    model = ESM3.from_pretrained("esm3_sm_open_v1")
-
-    if torch.cuda.is_available():
-        model = model.cuda()
-
-    model.eval()
-
-    return model
-
-
-# -----------------------------
-# Generate embedding
-# -----------------------------
-def generate_embedding(model, sequence):
-
-    protein = ESMProtein(sequence=sequence)
+def get_esm3_embeddings(seq: str, client: ESM3) -> np.ndarray:
+    protein = ESMProtein(sequence=seq)
+    protein_tensor = client.encode(protein)
 
     with torch.no_grad():
-        output = model.encode(protein)
+        output = client.forward_and_sample(
+            protein_tensor,
+            SamplingConfig(return_per_residue_embeddings=True)
+        )
 
-    embedding = output.per_residue_embeddings
+    emb = output.per_residue_embedding
 
-    embedding = torch.nan_to_num(
-        embedding,
-        nan=0.0,
-        posinf=0.0,
-        neginf=0.0
-    )
+    if len(emb.shape) == 3:
+        emb = emb[0]
 
-    return embedding
+    emb = emb[1:-1]
 
+    emb = torch.nan_to_num(emb, nan=0.0, posinf=0.0, neginf=0.0)
 
-# -----------------------------
-# Convert embedding → similarity matrix
-# -----------------------------
-def to_similarity_matrix(embedding):
+    return emb.cpu().numpy()
 
-    embedding_np = embedding.cpu().numpy()
-
-    sim_matrix = cosine_similarity(embedding_np)
-
-    return sim_matrix
-
-
-# -----------------------------
-# Normalize matrix
-# -----------------------------
-def normalize_matrix(matrix):
-
-    min_val = matrix.min()
-    max_val = matrix.max()
-
-    normalized = (matrix - min_val) / (max_val - min_val + 1e-8)
-
-    return normalized
-
-
-# -----------------------------
-# Save PNG
-# -----------------------------
-def save_image(matrix, output_path):
-
-    normalized = normalize_matrix(matrix)
-
-    plt.figure(figsize=(5,5))
-
-    plt.imshow(
-        normalized,
-        cmap="viridis",
-        vmin=0,
-        vmax=1
-    )
-
-    plt.title("Protein Similarity Image (ESM-3)")
-    plt.axis("off")
-
-    plt.tight_layout()
-
-    plt.savefig(output_path, bbox_inches="tight")
-
-    plt.close()
-
-    print(f"[✓] Saved image: {output_path}")
-
-
-# -----------------------------
-# Main
-# -----------------------------
 def main():
-
-    parser = argparse.ArgumentParser(
-        description="Generate protein feature image from sequence using ESM-3."
-    )
-
-    parser.add_argument(
-        "--sequence",
-        type=str,
-        required=True,
-        help="Protein sequence"
-    )
-
-    parser.add_argument(
-        "--out",
-        type=str,
-        default="protein_image.png",
-        help="Output image filename"
-    )
-
+    parser = argparse.ArgumentParser(description="Generate ESM-3 Cosine Similarity Image")
+    parser.add_argument("--sequence", type=str, required=True)
+    parser.add_argument("--out", type=str, default="protein_image.png")
     args = parser.parse_args()
 
-    model = load_esm3_model()
+    DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Loading ESM3 model onto {DEVICE}...")
 
-    embedding = generate_embedding(model, args.sequence)
+    try:
+        # 🔥 IMPORTANT: free memory before loading
+        if DEVICE.type == "cuda":
+            torch.cuda.empty_cache()
 
-    matrix = to_similarity_matrix(embedding)
+        # Load model
+        client = ESM3.from_pretrained(ESM3_OPEN_SMALL, device=DEVICE)
+        client.eval()
 
-    save_image(matrix, args.out)
+        # 🔥 CRITICAL PATCH: reduce memory usage
+        if DEVICE.type == "cuda":
+            client = client.half()
 
+        print("Extracting representations...")
+        embeddings = get_esm3_embeddings(args.sequence, client)
+        print(f"Embedding shape: {embeddings.shape}")
+
+        print("Calculating Cosine Similarity...")
+        sim_matrix = cosine_similarity(embeddings)
+
+        plt.figure(figsize=(8, 8))
+        sns.heatmap(
+            sim_matrix,
+            cmap="viridis",
+            cbar=True,
+            xticklabels=False,
+            yticklabels=False,
+            vmin=0.0,
+            vmax=1.0
+        )
+        plt.title("Protein Feature Image (ESM-3 Cosine Similarity)")
+
+        plt.tight_layout()
+        plt.savefig(args.out, dpi=300)
+        plt.close()
+
+        print(f"Success! Saved to {args.out}")
+
+    except torch.cuda.OutOfMemoryError:
+        print("⚠️ GPU OOM — retrying on CPU...")
+
+        DEVICE = torch.device("cpu")
+        client = ESM3.from_pretrained(ESM3_OPEN_SMALL, device=DEVICE)
+        client.eval()
+
+        embeddings = get_esm3_embeddings(args.sequence, client)
+        sim_matrix = cosine_similarity(embeddings)
+
+        plt.figure(figsize=(8, 8))
+        sns.heatmap(sim_matrix, cmap="viridis", cbar=True)
+        plt.savefig(args.out, dpi=300)
+        plt.close()
+
+        print(f"CPU fallback success! Saved to {args.out}")
+
+    except Exception as e:
+        print(f"Error: {e}")
 
 if __name__ == "__main__":
     main()
