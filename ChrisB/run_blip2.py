@@ -21,14 +21,14 @@ image_path = args.image
 # --- Debug: confirm which file is being processed ---
 print("Using image:", image_path)
 
-# --- Choose device ---
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# --- FORCE CPU (prevents GPU memory + compatibility issues) ---
+device = torch.device("cpu")
 
-# --- Load BLIP-2 model ---
+# --- Load BLIP-2 model (VALID model type) ---
 print("Loading BLIP-2 model...")
 model, vis_processors, _ = load_model_and_preprocess(
     name="blip2_t5",
-    model_type="pretrain_flant5base",
+    model_type="pretrain_flant5xl",  # ✅ correct model
     is_eval=True,
     device=device
 )
@@ -41,7 +41,7 @@ except FileNotFoundError:
 
 image = vis_processors["eval"](raw_image).unsqueeze(0).to(device)
 
-# --- Generate caption (FIX: add prompt) ---
+# --- Generate caption with prompt ---
 print("Generating description...")
 
 prompt = (
