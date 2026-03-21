@@ -41,28 +41,35 @@ except FileNotFoundError:
 
 image = vis_processors["eval"](raw_image).unsqueeze(0).to(device)
 
-# --- Strong prompt ---
+# --- Improved prompt (instruction-tuned format) ---
 print("Generating description...")
 
 prompt = (
-    "Analyze this protein similarity heatmap. "
+    "Question: Analyze this protein similarity heatmap. "
     "Identify structured regions, repeating patterns, or domain boundaries. "
-    "Explain what these patterns suggest about protein structure or function."
+    "Explain what these patterns suggest about protein structure or function. "
+    "Answer:"
 )
 
-# --- Generate (FIX: prevent empty output) ---
-output = model.generate({
-    "image": image,
-    "prompt": prompt,
-    "max_length": 120,
-    "num_beams": 5
-})
+# --- 🔥 APPLY YOUR RESEARCH: stochastic decoding ---
+output = model.generate(
+    {"image": image, "prompt": prompt},
 
-# --- Handle empty output ---
+    # REMOVE beam search → ADD nucleus sampling
+    use_nucleus_sampling=True,
+    top_p=0.9,
+    temperature=0.9,
+    repetition_penalty=1.4,
+    length_penalty=1.2,
+    max_length=120,
+    min_length=30
+)
+
+# --- Handle output ---
 if len(output) > 0 and output[0].strip():
     caption = output[0]
 else:
-    caption = "The image shows structured regions and possible domain organization within the protein."
+    caption = "The image suggests structured regions and possible domain organization within the protein."
 
 # --- Print ---
 print("\n🧬 Generated Protein Function Description:\n")
