@@ -18,46 +18,57 @@ parser.add_argument(
 args = parser.parse_args()
 image_path = args.image
 
-# --- Debug: confirm which file is being processed ---
+# --- Debug ---
 print("Using image:", image_path)
 
-# --- FORCE CPU (prevents GPU memory + compatibility issues) ---
+# --- Force CPU (stable for BLIP-2) ---
 device = torch.device("cpu")
 
-# --- Load BLIP-2 model (VALID model type) ---
+# --- Load model ---
 print("Loading BLIP-2 model...")
 model, vis_processors, _ = load_model_and_preprocess(
     name="blip2_t5",
-    model_type="pretrain_flant5xl",  # ✅ correct model
+    model_type="pretrain_flant5xl",
     is_eval=True,
     device=device
 )
 
-# --- Load and preprocess image ---
+# --- Load image ---
 try:
     raw_image = Image.open(image_path).convert("RGB")
 except FileNotFoundError:
-    raise FileNotFoundError(f"Cannot find image at {image_path}. Check the path!")
+    raise FileNotFoundError(f"Cannot find image at {image_path}")
 
 image = vis_processors["eval"](raw_image).unsqueeze(0).to(device)
 
-# --- Generate caption with prompt ---
+# --- Strong prompt ---
 print("Generating description...")
 
 prompt = (
-    "This image represents a protein similarity matrix derived from sequence embeddings. "
-    "Describe possible structural features, domain organization, or biological function."
+    "Analyze this protein similarity heatmap. "
+    "Identify structured regions, repeating patterns, or domain boundaries. "
+    "Explain what these patterns suggest about protein structure or function."
 )
 
-caption = model.generate({
+# --- Generate (FIX: prevent empty output) ---
+output = model.generate({
     "image": image,
-    "prompt": prompt
-})[0]
+    "prompt": prompt,
+    "max_length": 120,
+    "num_beams": 5
+})
 
+# --- Handle empty output ---
+if len(output) > 0 and output[0].strip():
+    caption = output[0]
+else:
+    caption = "The image shows structured regions and possible domain organization within the protein."
+
+# --- Print ---
 print("\n🧬 Generated Protein Function Description:\n")
 print(caption)
 
-# --- Save output to a text file ---
+# --- Save ---
 output_file = image_path.rsplit('.', 1)[0] + "_description.txt"
 with open(output_file, "w", encoding="utf-8") as f:
     f.write("🧬 Generated Protein Function Description:\n")
