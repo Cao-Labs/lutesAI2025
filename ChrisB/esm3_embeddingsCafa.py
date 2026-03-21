@@ -29,10 +29,20 @@ def get_esm3_embeddings(seq: str, client: ESM3) -> np.ndarray:
             SamplingConfig(return_per_residue_embeddings=True)
         )
         
-    # 4. Extract tensor to CPU and SLICE [1:-1] to remove the BOS/EOS artifacts
-    embeddings = output.per_residue_embedding[1:-1, :].cpu().numpy()
-    
-    return embeddings
+    # 4. Extract embeddings safely
+    emb = output.per_residue_embedding
+
+    # PATCH: handle possible batch dimension
+    if len(emb.shape) == 3:
+        emb = emb[0]
+
+    # Remove BOS/EOS tokens
+    emb = emb[1:-1]
+
+    # PATCH: clean numerical issues
+    emb = torch.nan_to_num(emb, nan=0.0, posinf=0.0, neginf=0.0)
+
+    return emb.cpu().numpy()
 
 def main():
     # Setup Command Line Arguments
