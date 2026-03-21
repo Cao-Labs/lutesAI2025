@@ -28,7 +28,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Loading BLIP-2 model...")
 model, vis_processors, _ = load_model_and_preprocess(
     name="blip2_t5",
-    model_type="pretrain_flant5base"
+    model_type="pretrain_flant5base",
     is_eval=True,
     device=device
 )
