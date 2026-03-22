@@ -2,16 +2,39 @@ import os
 import glob
 import pandas as pd
 import torch
+import re
 from sentence_transformers import SentenceTransformer, util
 
 # ============================================================
-# 🔹 FORCE CPU (critical fix)
+# 🔹 FORCE CPU
 # ============================================================
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
 device = torch.device("cpu")
 
 print("[+] Loading similarity model on CPU...")
 model = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
+
+
+# ============================================================
+# 🔹 CLEAN TEXT FUNCTION (KEY PATCH)
+# ============================================================
+# Removes noise that hurts similarity scores
+def clean_text(text):
+    text = text.lower()
+
+    # Remove unwanted phrases (from previous outputs)
+    text = text.replace("generated protein function description:", "")
+
+    # Remove emojis / non-ascii characters
+    text = re.sub(r'[^\x00-\x7F]+', ' ', text)
+
+    # Remove punctuation
+    text = re.sub(r'[^\w\s]', ' ', text)
+
+    # Collapse whitespace
+    text = re.sub(r'\s+', ' ', text).strip()
+
+    return text
 
 
 # ============================================================
@@ -40,15 +63,24 @@ def parse_go_obo(obo_path):
 
 
 # ============================================================
-# 🔹 Similarity scoring
+# 🔹 Similarity scoring (with cleaning)
 # ============================================================
 def get_top_go_matches(generated_desc, reference_go_dict, top_k=5):
+
+    # 🔥 CLEAN BEFORE EMBEDDING (BIG IMPACT)
+    generated_desc = clean_text(generated_desc)
+
     gen_embedding = model.encode(generated_desc, convert_to_tensor=True)
 
     results = []
     for go_id, entry in reference_go_dict.items():
-        ref_embedding = model.encode(entry["definition"], convert_to_tensor=True)
+
+        # Clean GO definitions too (important!)
+        clean_def = clean_text(entry["definition"])
+
+        ref_embedding = model.encode(clean_def, convert_to_tensor=True)
         score = util.cos_sim(gen_embedding, ref_embedding).item()
+
         results.append((go_id, entry["name"], entry["definition"], score))
 
     results.sort(key=lambda x: x[3], reverse=True)
@@ -64,12 +96,12 @@ if __name__ == "__main__":
 
     print("\n[+] Loading GO terms...")
     all_go_terms = parse_go_obo(go_path)
-    print(f"✅ Loaded {len(all_go_terms)} GO terms.")
+    print(f"Loaded {len(all_go_terms)} GO terms.")
 
     caption_files = sorted(glob.glob("*_description.txt"))
 
     if not caption_files:
-        print("⚠️ No caption files found")
+        print("No caption files found")
         exit()
 
     all_results = []
@@ -79,7 +111,7 @@ if __name__ == "__main__":
             caption = f.read().strip()
 
         base = os.path.basename(fpath)
-        print(f"\n🔍 Evaluating {base} ...")
+        print(f"\nEvaluating {base} ...")
 
         top_matches = get_top_go_matches(caption, all_go_terms)
 
@@ -96,4 +128,4 @@ if __name__ == "__main__":
     out_path = "top_similarity_results.csv"
     pd.DataFrame(all_results).to_csv(out_path, index=False)
 
-    print(f"\n✅ Done! Saved → {os.path.abspath(out_path)}")
+    print(f"\nSaved → {os.path.abspath(out_path)}")
