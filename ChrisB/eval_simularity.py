@@ -1,17 +1,21 @@
 import os
 import glob
 import pandas as pd
+import torch
 from sentence_transformers import SentenceTransformer, util
 
 # ============================================================
-# 🔹 1. Load sentence-transformers model
+# 🔹 FORCE CPU (critical fix)
 # ============================================================
-print("[+] Loading similarity model...")
-model = SentenceTransformer('all-MiniLM-L6-v2')
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+device = torch.device("cpu")
+
+print("[+] Loading similarity model on CPU...")
+model = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
 
 
 # ============================================================
-# 🔹 2. Parse GO .obo file into dict
+# 🔹 Parse GO file
 # ============================================================
 def parse_go_obo(obo_path):
     go_terms = {}
@@ -36,7 +40,7 @@ def parse_go_obo(obo_path):
 
 
 # ============================================================
-# 🔹 3. Compute top-N most similar GO definitions
+# 🔹 Similarity scoring
 # ============================================================
 def get_top_go_matches(generated_desc, reference_go_dict, top_k=5):
     gen_embedding = model.encode(generated_desc, convert_to_tensor=True)
@@ -52,22 +56,20 @@ def get_top_go_matches(generated_desc, reference_go_dict, top_k=5):
 
 
 # ============================================================
-# 🔹 4. Main execution
+# 🔹 Main
 # ============================================================
 if __name__ == "__main__":
 
-    # 🔥 Correct path to GO file (no copying needed)
     go_path = "/DATA/shared/database/UniProt2025/GO_June_1_2025.obo"
 
     print("\n[+] Loading GO terms...")
     all_go_terms = parse_go_obo(go_path)
     print(f"✅ Loaded {len(all_go_terms)} GO terms.")
 
-    # 🔥 Find ALL description files in your folder
     caption_files = sorted(glob.glob("*_description.txt"))
 
     if not caption_files:
-        print("⚠️ No caption files found (expected *_description.txt)")
+        print("⚠️ No caption files found")
         exit()
 
     all_results = []
@@ -79,7 +81,7 @@ if __name__ == "__main__":
         base = os.path.basename(fpath)
         print(f"\n🔍 Evaluating {base} ...")
 
-        top_matches = get_top_go_matches(caption, all_go_terms, top_k=5)
+        top_matches = get_top_go_matches(caption, all_go_terms)
 
         for go_id, name, definition, score in top_matches:
             all_results.append({
@@ -91,8 +93,7 @@ if __name__ == "__main__":
                 "similarity_score": score
             })
 
-    # Save results
     out_path = "top_similarity_results.csv"
     pd.DataFrame(all_results).to_csv(out_path, index=False)
 
-    print(f"\n✅ Done! Saved results → {os.path.abspath(out_path)}")
+    print(f"\n✅ Done! Saved → {os.path.abspath(out_path)}")
