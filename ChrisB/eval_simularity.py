@@ -16,16 +16,15 @@ model = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
 
 
 # ============================================================
-# 🔹 CLEAN TEXT FUNCTION (KEY PATCH)
+# 🔹 CLEAN TEXT FUNCTION
 # ============================================================
-# Removes noise that hurts similarity scores
 def clean_text(text):
     text = text.lower()
 
-    # Remove unwanted phrases (from previous outputs)
+    # Remove unwanted phrases
     text = text.replace("generated protein function description:", "")
 
-    # Remove emojis / non-ascii characters
+    # Remove emojis / non-ascii
     text = re.sub(r'[^\x00-\x7F]+', ' ', text)
 
     # Remove punctuation
@@ -33,6 +32,30 @@ def clean_text(text):
 
     # Collapse whitespace
     text = re.sub(r'\s+', ' ', text).strip()
+
+    return text
+
+
+# ============================================================
+# 🔹 STRUCTURE → FUNCTION MAPPING (NEW PATCH)
+# ============================================================
+def structure_to_function(text):
+    # Map structural language → functional biology language
+    rules = {
+        "domain": "functional domain involved in binding or signaling",
+        "motif": "repeating structural motif involved in interaction",
+        "interaction": "protein protein interaction activity",
+        "binding": "binding activity",
+        "fold": "protein folding process",
+        "disordered": "intrinsically disordered regulatory region",
+        "region": "functional region",
+        "signal": "cell signaling or molecular signaling process"
+    }
+
+    # Append functional meaning if keywords found
+    for key, val in rules.items():
+        if key in text:
+            text += " " + val
 
     return text
 
@@ -63,22 +86,29 @@ def parse_go_obo(obo_path):
 
 
 # ============================================================
-# 🔹 Similarity scoring (with cleaning)
+# 🔹 Similarity scoring (UPDATED)
 # ============================================================
 def get_top_go_matches(generated_desc, reference_go_dict, top_k=5):
 
-    # 🔥 CLEAN BEFORE EMBEDDING (BIG IMPACT)
+    # 🔥 Step 1: clean text
     generated_desc = clean_text(generated_desc)
 
+    # 🔥 Step 2: convert structure → function (KEY UPGRADE)
+    generated_desc = structure_to_function(generated_desc)
+
+    # Encode generated description
     gen_embedding = model.encode(generated_desc, convert_to_tensor=True)
 
     results = []
     for go_id, entry in reference_go_dict.items():
 
-        # Clean GO definitions too (important!)
+        # Clean GO definition
         clean_def = clean_text(entry["definition"])
 
+        # Encode GO definition
         ref_embedding = model.encode(clean_def, convert_to_tensor=True)
+
+        # Compute similarity
         score = util.cos_sim(gen_embedding, ref_embedding).item()
 
         results.append((go_id, entry["name"], entry["definition"], score))
