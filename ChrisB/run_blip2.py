@@ -58,43 +58,44 @@ image = vis_processors["eval"](raw_image).unsqueeze(0).to(device)
 
 
 # -------------------------------
-# 5. 🔥 IMPROVED PROMPT (KEY PATCH)
+# 5. 🔥 STRONGER PROMPT (ANTI-TEMPLATE)
 # -------------------------------
-# Changes:
-# - forces biological language (not generic "heatmap")
-# - removes repetition loops
-# - explicitly asks for FUNCTION (not just structure)
 print("Generating description...")
 
 prompt = (
     "You are a computational structural biologist.\n"
-    "Interpret this protein similarity matrix biologically.\n\n"
-    "Rules:\n"
-    "- Diagonal blocks represent structural domains.\n"
-    "- Off-diagonal patterns indicate interactions or repeating motifs.\n"
-    "- Gaps indicate flexible or disordered regions.\n\n"
-    "Task:\n"
-    "Describe the protein in terms of:\n"
-    "1. Domain organization\n"
-    "2. Structural motifs\n"
-    "3. Possible biological function (binding, signaling, folding, etc.)\n\n"
-    "Answer:"
+    "Analyze this protein similarity matrix and describe it biologically.\n\n"
+
+    "Interpretation rules:\n"
+    "- Diagonal blocks indicate structural domains\n"
+    "- Off-diagonal signals indicate interactions or repeating motifs\n"
+    "- Gaps indicate flexible or disordered regions\n\n"
+
+    "Instructions:\n"
+    "- Write ONE clear paragraph (no bullet points, no numbering)\n"
+    "- Be specific about where patterns occur (beginning, middle, end)\n"
+    "- Describe how many domains are visible and how they are arranged\n"
+    "- Mention any repeating or asymmetric patterns\n"
+    "- Suggest a possible biological role based on structure\n"
+    "- Do NOT repeat phrases or use generic templates\n\n"
+
+    "Final Answer:"
 )
 
 
 # -------------------------------
-# 6. Generate (optimized decoding)
+# 6. 🔥 GENERATION (FIX REPETITION)
 # -------------------------------
 output = model.generate(
     {"image": image, "prompt": prompt},
 
     use_nucleus_sampling=True,
-    top_p=0.9,
-    temperature=0.85,
-    repetition_penalty=1.4,
-    length_penalty=1.2,
-    max_length=150,
-    min_length=50   # 🔥 slightly higher → more meaningful output
+    top_p=0.85,              # slightly tighter sampling
+    temperature=0.7,         # less randomness → more grounded
+    repetition_penalty=2.0,  # 🔥 STRONG anti-repeat
+    length_penalty=1.1,
+    max_length=160,
+    min_length=60
 )
 
 
@@ -105,8 +106,8 @@ if len(output) > 0 and output[0].strip():
     caption = output[0].strip()
 else:
     caption = (
-        "The protein shows structured domains with possible interactions, "
-        "suggesting a role in binding or signaling processes."
+        "The protein displays multiple structured domains with distinct regions "
+        "of interaction, suggesting a role in molecular binding or signaling."
     )
 
 
@@ -120,9 +121,6 @@ print(caption)
 # -------------------------------
 # 9. Save (CLEAN OUTPUT)
 # -------------------------------
-# 🔥 IMPORTANT CHANGE:
-# - removed emoji + header
-# - saves CLEAN text for better similarity scoring
 output_file = image_path.rsplit('.', 1)[0] + "_description.txt"
 
 with open(output_file, "w", encoding="utf-8") as f:
