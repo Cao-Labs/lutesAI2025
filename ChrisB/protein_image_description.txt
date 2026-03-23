@@ -1,2 +1,0 @@
-🧬 Generated Protein Function Description:
-a heatmap is a visual representation of a protein's similarity to other proteins a heatmap is a visual representation of
