@@ -1,6 +1,6 @@
-# 🧬 Protein Function Prediction from Sequence (ESM-3 + BLIP-2)
+#  Protein Function Prediction from Sequence (ESM-3 + BLIP-2)
 
-## 📌 Overview
+## Overview
 
 This project explores a new way to understand proteins using AI.
 
@@ -39,7 +39,7 @@ GO Similarity Scoring
 
 ## ⚙️ Setup
 
-### 🔹 Environment 1 (BLIP-2)
+###  Environment 1 (BLIP-2)
 
 ```bash
 conda create -n blip2_env python=3.10
@@ -53,7 +53,7 @@ pip install salesforce-lavis
 
 ---
 
-### 🔹 Environment 2 (Evaluation)
+###  Environment 2 (Evaluation)
 
 ```bash
 conda create -n esm-env python=3.10
@@ -64,9 +64,9 @@ pip install sentence-transformers pandas
 
 ---
 
-## 🚀 How to Run
+## How to Run
 
-### 1️⃣ Generate protein image
+###  Generate protein image
 
 ```bash
 python generate_protein_image.py --sequence "YOUR_SEQUENCE" --out protein.png
@@ -74,7 +74,7 @@ python generate_protein_image.py --sequence "YOUR_SEQUENCE" --out protein.png
 
 ---
 
-### 2️⃣ Generate description (BLIP-2)
+###  Generate description (BLIP-2)
 
 ```bash
 conda activate blip2_env
@@ -89,7 +89,7 @@ protein_description.txt
 
 ---
 
-### 3️⃣ Evaluate similarity (GO)
+### Evaluate similarity (GO)
 
 ```bash
 conda activate esm-env
@@ -105,7 +105,7 @@ top_similarity_results.csv
 
 ---
 
-## 📊 Output
+## Output
 
 * `*_description.txt` → generated protein description
 * `top_similarity_results.csv` → similarity scores vs GO
@@ -114,7 +114,7 @@ Scores ~0.55–0.60 indicate meaningful alignment between structure and function
 
 ---
 
-## 🧠 Key Idea
+##  Key Idea
 
 BLIP-2 describes **structure**, but GO describes **function**.
 
@@ -127,7 +127,7 @@ This improves similarity without retraining models.
 
 ---
 
-## 📁 Files
+##  Files
 
 * `generate_protein_image.py` → creates similarity matrix image
 * `run_blip2.py` → generates description from image
@@ -136,7 +136,7 @@ This improves similarity without retraining models.
 
 ---
 
-## ⚠️ Notes
+## Notes
 
 * BLIP-2 and evaluation require different environments due to dependency conflicts
 * GPU is optional (CPU recommended for stability)
@@ -144,7 +144,7 @@ This improves similarity without retraining models.
 
 ---
 
-## 👤 Author
+## Author
 
 Christopher Barker
 Pacific Lutheran University
@@ -152,7 +152,7 @@ GitHub: https://github.com/ChristopherDSBarker
 
 ---
 
-## ⚠️ License
+##  License
 
 This project uses Meta AI’s ESM-3 model for academic research only.
 Refer to: https://github.com/facebookresearch/esm
