@@ -1,2 +1,0 @@
-🧬 Generated Protein Function Description:
-off-diagonal signals indicate interactions or repeating motifs and gaps indicate boundaries or flexible regions, while diagonal blocks indicate structural domains and off-diagonal signals indicate interactions or repeating patterns
