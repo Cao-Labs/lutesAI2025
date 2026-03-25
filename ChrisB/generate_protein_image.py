@@ -78,7 +78,7 @@ def main():
     args = parser.parse_args()
 
     # Use GPU if available (optional, CPU is fine)
-    DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    DEVICE = torch.device('cpu')
     print(f"Loading ESM-3 on {DEVICE}")
 
     try:
