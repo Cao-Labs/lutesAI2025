@@ -3,42 +3,69 @@ import glob
 import pandas as pd
 import torch
 import re
-import numpy as np
 from sentence_transformers import SentenceTransformer, util
 
+# ============================================================
+# 🔹 FORCE CPU
+# ============================================================
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
 device = torch.device("cpu")
 
-print("[+] Loading model...")
+print("[+] Loading similarity model on CPU...")
 model = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
 
 
+# ============================================================
+# 🔹 CLEAN TEXT FUNCTION
+# ============================================================
 def clean_text(text):
     text = text.lower()
+
+    # Remove unwanted phrases
+    text = text.replace("generated protein function description:", "")
+
+    # Remove emojis / non-ascii
     text = re.sub(r'[^\x00-\x7F]+', ' ', text)
+
+    # Remove punctuation
     text = re.sub(r'[^\w\s]', ' ', text)
+
+    # Collapse whitespace
     text = re.sub(r'\s+', ' ', text).strip()
+
     return text
 
 
+# ============================================================
+# 🔹 STRUCTURE → FUNCTION MAPPING (NEW PATCH)
+# ============================================================
 def structure_to_function(text):
+    # Map structural language → functional biology language
     rules = {
-        "domain": "functional domain binding activity",
-        "motif": "repeating interaction motif",
-        "interaction": "protein interaction",
-        "binding": "binding function",
-        "fold": "protein folding",
-        "signal": "cell signaling"
+        "domain": "functional domain involved in binding or signaling",
+        "motif": "repeating structural motif involved in interaction",
+        "interaction": "protein protein interaction activity",
+        "binding": "binding activity",
+        "fold": "protein folding process",
+        "disordered": "intrinsically disordered regulatory region",
+        "region": "functional region",
+        "signal": "cell signaling or molecular signaling process"
     }
-    for k, v in rules.items():
-        if k in text:
-            text += " " + v
+
+    # Append functional meaning if keywords found
+    for key, val in rules.items():
+        if key in text:
+            text += " " + val
+
     return text
 
 
-def parse_go_obo(path):
-    go = {}
-    with open(path, 'r') as f:
+# ============================================================
+# 🔹 Parse GO file
+# ============================================================
+def parse_go_obo(obo_path):
+    go_terms = {}
+    with open(obo_path, 'r', encoding='utf-8') as f:
         term = {}
         for line in f:
             line = line.strip()
@@ -51,56 +78,84 @@ def parse_go_obo(path):
             elif line.startswith('def: "'):
                 term["def"] = line.split('def: "')[1].split('"')[0]
             elif line == "" and "id" in term and "def" in term:
-                go[term["id"]] = {
+                go_terms[term["id"]] = {
                     "name": term.get("name", ""),
                     "definition": term["def"]
                 }
-    return go
+    return go_terms
 
 
-def get_scores(text, go_terms):
-    text = structure_to_function(clean_text(text))
-    emb = model.encode(text, convert_to_tensor=True)
+# ============================================================
+# 🔹 Similarity scoring (UPDATED)
+# ============================================================
+def get_top_go_matches(generated_desc, reference_go_dict, top_k=5):
 
-    scores = []
-    for go_id, entry in go_terms.items():
-        ref = clean_text(entry["definition"])
-        ref_emb = model.encode(ref, convert_to_tensor=True)
-        score = util.cos_sim(emb, ref_emb).item()
-        scores.append(score)
+    # 🔥 Step 1: clean text
+    generated_desc = clean_text(generated_desc)
 
-    return scores
+    # 🔥 Step 2: convert structure → function (KEY UPGRADE)
+    generated_desc = structure_to_function(generated_desc)
+
+    # Encode generated description
+    gen_embedding = model.encode(generated_desc, convert_to_tensor=True)
+
+    results = []
+    for go_id, entry in reference_go_dict.items():
+
+        # Clean GO definition
+        clean_def = clean_text(entry["definition"])
+
+        # Encode GO definition
+        ref_embedding = model.encode(clean_def, convert_to_tensor=True)
+
+        # Compute similarity
+        score = util.cos_sim(gen_embedding, ref_embedding).item()
+
+        results.append((go_id, entry["name"], entry["definition"], score))
+
+    results.sort(key=lambda x: x[3], reverse=True)
+    return results[:top_k]
 
 
+# ============================================================
+# 🔹 Main
+# ============================================================
 if __name__ == "__main__":
+
     go_path = "/DATA/shared/database/UniProt2025/GO_June_1_2025.obo"
-    go_terms = parse_go_obo(go_path)
 
-    files = sorted(glob.glob("*_description.txt"))
+    print("\n[+] Loading GO terms...")
+    all_go_terms = parse_go_obo(go_path)
+    print(f"Loaded {len(all_go_terms)} GO terms.")
 
-    all_scores = []
+    caption_files = sorted(glob.glob("*_description.txt"))
 
-    for f in files:
-        with open(f) as fp:
-            text = fp.read()
+    if not caption_files:
+        print("No caption files found")
+        exit()
 
-        scores = get_scores(text, go_terms)
+    all_results = []
 
-        # 🔥 stats
-        stats = {
-            "file": f,
-            "mean": np.mean(scores),
-            "std": np.std(scores),
-            "max": np.max(scores),
-            "min": np.min(scores)
-        }
+    for fpath in caption_files:
+        with open(fpath, "r", encoding="utf-8") as f:
+            caption = f.read().strip()
 
-        print(f"\n{f}")
-        print(stats)
+        base = os.path.basename(fpath)
+        print(f"\nEvaluating {base} ...")
 
-        all_scores.append(stats)
+        top_matches = get_top_go_matches(caption, all_go_terms)
 
-    df = pd.DataFrame(all_scores)
-    df.to_csv("evaluation_summary.csv", index=False)
+        for go_id, name, definition, score in top_matches:
+            all_results.append({
+                "file": base,
+                "generated_caption": caption,
+                "go_id": go_id,
+                "go_name": name,
+                "go_definition": definition,
+                "similarity_score": score
+            })
 
-    print("\nSaved → evaluation_summary.csv")
+    out_path = "top_similarity_results.csv"
+    pd.DataFrame(all_results).to_csv(out_path, index=False)
+
+    print(f"\nSaved → {os.path.abspath(out_path)}")
