@@ -3,44 +3,38 @@ import glob
 import pandas as pd
 import torch
 import re
-from sentence_transformers import SentenceTransformer, util
+from sentence_transformers import SentenceTransformer
 
 # ============================================================
-# 🔹 FORCE CPU
+#  FORCE CPU
 # ============================================================
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
 device = torch.device("cpu")
 
 print("[+] Loading similarity model on CPU...")
-model = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
+
+#  UPGRADE: stronger semantic model (drop-in replacement)
+model = SentenceTransformer('all-mpnet-base-v2', device='cpu')
 
 
 # ============================================================
-# 🔹 CLEAN TEXT FUNCTION
+#  CLEAN TEXT FUNCTION
 # ============================================================
 def clean_text(text):
     text = text.lower()
 
-    # Remove unwanted phrases
     text = text.replace("generated protein function description:", "")
-
-    # Remove emojis / non-ascii
     text = re.sub(r'[^\x00-\x7F]+', ' ', text)
-
-    # Remove punctuation
     text = re.sub(r'[^\w\s]', ' ', text)
-
-    # Collapse whitespace
     text = re.sub(r'\s+', ' ', text).strip()
 
     return text
 
 
 # ============================================================
-# 🔹 STRUCTURE → FUNCTION MAPPING (NEW PATCH)
+#  STRUCTURE → FUNCTION MAPPING (WEIGHTED)
 # ============================================================
 def structure_to_function(text):
-    # Map structural language → functional biology language
     rules = {
         "domain": "functional domain involved in binding or signaling",
         "motif": "repeating structural motif involved in interaction",
@@ -52,16 +46,18 @@ def structure_to_function(text):
         "signal": "cell signaling or molecular signaling process"
     }
 
-    # Append functional meaning if keywords found
+    additions = []
+
     for key, val in rules.items():
         if key in text:
-            text += " " + val
+            additions.append(val)
+            additions.append(val)  # 🔥 double weight
 
-    return text
+    return text + " " + " ".join(additions)
 
 
 # ============================================================
-# 🔹 Parse GO file
+# Parse GO file
 # ============================================================
 def parse_go_obo(obo_path):
     go_terms = {}
@@ -86,30 +82,31 @@ def parse_go_obo(obo_path):
 
 
 # ============================================================
-# 🔹 Similarity scoring (UPDATED)
+#  Similarity scoring (IMPROVED)
 # ============================================================
-def get_top_go_matches(generated_desc, reference_go_dict, top_k=5):
+def get_top_go_matches(generated_desc, reference_go_dict, go_embeddings, top_k=5):
 
-    # 🔥 Step 1: clean text
+    # Clean + map structure → function
     generated_desc = clean_text(generated_desc)
-
-    # 🔥 Step 2: convert structure → function (KEY UPGRADE)
     generated_desc = structure_to_function(generated_desc)
 
     # Encode generated description
     gen_embedding = model.encode(generated_desc, convert_to_tensor=True)
 
+    #  Normalize embedding (important for stable cosine similarity)
+    gen_embedding = torch.nn.functional.normalize(gen_embedding, p=2, dim=0)
+
     results = []
+
     for go_id, entry in reference_go_dict.items():
 
-        # Clean GO definition
-        clean_def = clean_text(entry["definition"])
+        ref_embedding = go_embeddings[go_id]
 
-        # Encode GO definition
-        ref_embedding = model.encode(clean_def, convert_to_tensor=True)
+        #  Normalize reference embedding
+        ref_embedding = torch.nn.functional.normalize(ref_embedding, p=2, dim=0)
 
-        # Compute similarity
-        score = util.cos_sim(gen_embedding, ref_embedding).item()
+        #  Dot product = cosine similarity after normalization
+        score = torch.dot(gen_embedding, ref_embedding).item()
 
         results.append((go_id, entry["name"], entry["definition"], score))
 
@@ -118,7 +115,7 @@ def get_top_go_matches(generated_desc, reference_go_dict, top_k=5):
 
 
 # ============================================================
-# 🔹 Main
+#  Main
 # ============================================================
 if __name__ == "__main__":
 
@@ -127,6 +124,13 @@ if __name__ == "__main__":
     print("\n[+] Loading GO terms...")
     all_go_terms = parse_go_obo(go_path)
     print(f"Loaded {len(all_go_terms)} GO terms.")
+
+    #  Precompute GO embeddings ONCE (faster + consistent)
+    print("[+] Precomputing GO embeddings...")
+    go_embeddings = {
+        go_id: model.encode(clean_text(entry["definition"]), convert_to_tensor=True)
+        for go_id, entry in all_go_terms.items()
+    }
 
     caption_files = sorted(glob.glob("*_description.txt"))
 
@@ -143,7 +147,11 @@ if __name__ == "__main__":
         base = os.path.basename(fpath)
         print(f"\nEvaluating {base} ...")
 
-        top_matches = get_top_go_matches(caption, all_go_terms)
+        top_matches = get_top_go_matches(
+            caption,
+            all_go_terms,
+            go_embeddings
+        )
 
         for go_id, name, definition, score in top_matches:
             all_results.append({
