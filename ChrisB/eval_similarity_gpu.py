@@ -6,17 +6,24 @@ import re
 from sentence_transformers import SentenceTransformer
 
 # ============================================================
-#  USE GPU (AUTO FALLBACK)
+#  GPU ENABLED (DIFF FROM CPU VERSION)
 # ============================================================
+# CPU VERSION:
+# os.environ["CUDA_VISIBLE_DEVICES"] = ""
+# device = torch.device("cpu")
+
+# GPU PATCH:
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 print(f"[+] Loading similarity model on {device.upper()}...")
 
+# CPU VERSION: device='cpu'
+# GPU PATCH:
 model = SentenceTransformer('all-mpnet-base-v2', device=device)
 
 
 # ============================================================
-#  CLEAN TEXT FUNCTION
+#  CLEAN TEXT FUNCTION (UNCHANGED)
 # ============================================================
 def clean_text(text):
     text = text.lower()
@@ -28,7 +35,7 @@ def clean_text(text):
 
 
 # ============================================================
-#  STRUCTURE → FUNCTION MAPPING (WEIGHTED)
+#  STRUCTURE → FUNCTION MAPPING (UNCHANGED)
 # ============================================================
 def structure_to_function(text):
     rules = {
@@ -53,7 +60,7 @@ def structure_to_function(text):
 
 
 # ============================================================
-# Parse GO file
+# Parse GO file (UNCHANGED)
 # ============================================================
 def parse_go_obo(obo_path):
     go_terms = {}
@@ -78,23 +85,29 @@ def parse_go_obo(obo_path):
 
 
 # ============================================================
-#  Similarity scoring
+#  Similarity scoring (PATCHED FOR GPU MEMORY SAFETY)
 # ============================================================
 def get_top_go_matches(generated_desc, reference_go_dict, go_embeddings, top_k=5):
 
     generated_desc = clean_text(generated_desc)
     generated_desc = structure_to_function(generated_desc)
 
+    # stays on GPU
     gen_embedding = model.encode(generated_desc, convert_to_tensor=True)
     gen_embedding = torch.nn.functional.normalize(gen_embedding, p=2, dim=0)
 
     results = []
 
     for go_id, entry in reference_go_dict.items():
-        ref_embedding = go_embeddings[go_id]
+
+        # CPU VERSION: ref_embedding = go_embeddings[go_id]
+        # GPU PATCH: move ONE embedding at a time to GPU
+        ref_embedding = go_embeddings[go_id].to(gen_embedding.device)
+
         ref_embedding = torch.nn.functional.normalize(ref_embedding, p=2, dim=0)
 
         score = torch.dot(gen_embedding, ref_embedding).item()
+
         results.append((go_id, entry["name"], entry["definition"], score))
 
     results.sort(key=lambda x: x[3], reverse=True)
@@ -112,9 +125,21 @@ if __name__ == "__main__":
     all_go_terms = parse_go_obo(go_path)
     print(f"Loaded {len(all_go_terms)} GO terms.")
 
-    print("[+] Precomputing GO embeddings...")
+    # ========================================================
+    #  PATCH: STORE EMBEDDINGS ON CPU (CRITICAL FIX)
+    # ========================================================
+    # CPU VERSION: everything on CPU anyway
+    # BAD GPU VERSION: everything stored on GPU → OOM
+    # FIX: compute with model, but STORE on CPU
+
+    print("[+] Precomputing GO embeddings (stored on CPU)...")
+
     go_embeddings = {
-        go_id: model.encode(clean_text(entry["definition"]), convert_to_tensor=True)
+        go_id: model.encode(
+            clean_text(entry["definition"]),
+            convert_to_tensor=True,
+            device="cpu"   # 🔥 KEY PATCH (prevents OOM)
+        )
         for go_id, entry in all_go_terms.items()
     }
 
