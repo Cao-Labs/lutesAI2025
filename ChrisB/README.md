@@ -1,4 +1,5 @@
-#  Protein Function Prediction from Sequence (ESM-3 + BLIP-2)
+#  Multimodal Protein Function Inference via Vision-Language Models and Structural Similarity Representations
+
 
 ## Overview
 
