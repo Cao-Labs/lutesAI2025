@@ -1,0 +1,1 @@
+a protein similarity matrix is a graph that shows the structural similarity between two proteins in a given domain block or interaction cluster, as well as the structural similarity between two proteins in a given domain block or interaction cluster,

@@ -1,0 +1,1 @@
+a protein similarity matrix is used to visualize structural similarities between proteins in the same domain block or interaction clusters, as well as between proteins in different domain blocks or interaction clusters and between proteins in different domain blocks or interaction clusters.
